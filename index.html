@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Автоматизация альфа-имён | Kazinfoteh (браузерная версия n8n workflow)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #f1f5f9;
+    color: #334155;
+    min-height: 100vh;
+    padding: 32px 20px;
+    line-height: 1.6;
+  }
+  .page { max-width: 980px; margin: 0 auto; }
+  .container {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,.05), 0 10px 15px -3px rgba(0,0,0,.05);
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 24px;
+  }
+  .header { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 28px 40px; text-align: center; }
+  .header h1 { font-size: 24px; font-weight: 700; color: #0f172a; margin-bottom: 8px; letter-spacing: -.5px; }
+  .header p { font-size: 14px; color: #64748b; max-width: 640px; margin: 0 auto; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 8px; padding: 16px 40px 0; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+  .tab {
+    padding: 10px 18px; border: none; background: transparent; cursor: pointer;
+    font-size: 14px; font-weight: 600; color: #64748b; border-bottom: 3px solid transparent;
+    transition: all .2s ease; font-family: inherit;
+  }
+  .tab:hover { color: #1d4ed8; }
+  .tab.active { color: #1d4ed8; border-bottom-color: #2563eb; }
+
+  .panel { padding: 32px 40px 40px; }
+  .section { margin-bottom: 32px; padding-bottom: 32px; border-bottom: 1px dashed #e2e8f0; }
+  .section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .section-title {
+    font-size: 14px; font-weight: 600; color: #0f172a; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: .5px;
+  }
+  .section-title::before { content: ''; width: 4px; height: 18px; background: #3b82f6; border-radius: 4px; }
+
+  .field { margin-bottom: 20px; }
+  .field label { display: block; font-size: 14px; font-weight: 500; color: #334155; margin-bottom: 8px; }
+  .field label .required { color: #ef4444; margin-left: 3px; }
+  .field input[type=text], .field input[type=url], .field input[type=number],
+  .field input[type=date], .field textarea, .field select {
+    width: 100%; padding: 12px 16px; border: 1px solid #cbd5e1; border-radius: 8px;
+    font-size: 15px; color: #0f172a; background: #fff; transition: all .2s ease; font-family: inherit;
+  }
+  .field input:focus, .field textarea:focus, .field select:focus {
+    outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+  }
+  .field textarea { resize: vertical; min-height: 90px; }
+  .field .hint { font-size: 13px; color: #64748b; margin-top: 6px; }
+  .field.error input, .field.error textarea, .field.error select { border-color: #ef4444; background: #fef2f2; }
+  .field .error-msg { color: #ef4444; font-size: 13px; margin-top: 6px; display: none; font-weight: 500; }
+  .field.error .error-msg { display: block; }
+
+  .radio-group, .checkbox-group { display: flex; gap: 16px; margin-top: 4px; flex-wrap: wrap; }
+  .radio-option, .checkbox-option { flex: 1; min-width: 140px; position: relative; }
+  .radio-option input, .checkbox-option input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .radio-option label, .checkbox-option label {
+    display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px;
+    border: 1px solid #cbd5e1; border-radius: 10px; text-align: center; cursor: pointer;
+    transition: all .2s ease; font-weight: 500; color: #475569; background: #f8fafc; margin: 0;
+  }
+  .radio-option input:checked + label, .checkbox-option input:checked + label {
+    border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 1px #3b82f6;
+  }
+  .radio-option label:hover, .checkbox-option label:hover { border-color: #94a3b8; }
+
+  .btn {
+    width: 100%; padding: 14px 24px; background: #2563eb; color: #fff; border: none; border-radius: 10px;
+    font-size: 16px; font-weight: 600; cursor: pointer; transition: all .2s ease; margin-top: 16px;
+    box-shadow: 0 4px 6px -1px rgba(37,99,235,.2); font-family: inherit;
+  }
+  .btn:hover { background: #1d4ed8; transform: translateY(-1px); box-shadow: 0 6px 10px -1px rgba(37,99,235,.3); }
+  .btn:active { transform: translateY(0); }
+  .btn:disabled { opacity: .6; cursor: not-allowed; transform: none; box-shadow: none; }
+  .btn.secondary { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; box-shadow: none; }
+  .btn.secondary:hover { background: #e2e8f0; }
+
+  .result { padding: 20px 24px; border-radius: 12px; display: none; margin-top: 24px; }
+  .result.success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; display: block; }
+  .result.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; display: block; }
+  .result.info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; display: block; }
+  .result h3 { margin-bottom: 8px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+  .result ul { margin-top: 12px; padding-left: 20px; }
+  .result li { margin: 6px 0; font-size: 14px; }
+  .result a { color: inherit; font-weight: 600; }
+
+  .hidden { display: none !important; }
+  .counter { font-size: 12px; color: #64748b; text-align: right; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .counter.over { color: #ef4444; font-weight: 600; }
+
+  .data-table { width: 100%; border-collapse: collapse; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+  .data-table tr { border-bottom: 1px solid #e2e8f0; }
+  .data-table tr:last-child { border-bottom: none; }
+  .data-table th { text-align: left; padding: 10px 14px; font-size: 12px; font-weight: 600; color: #64748b; background: #f1f5f9; width: 38%; vertical-align: top; text-transform: uppercase; letter-spacing: .3px; }
+  .data-table td { padding: 10px 14px; font-size: 14px; color: #0f172a; word-break: break-word; }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; background: #ede9fe; color: #6d28d9; }
+
+  /* Log console */
+  .log {
+    background: #0f172a; color: #e2e8f0; border-radius: 10px; padding: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px; max-height: 340px; overflow-y: auto; margin-top: 16px; white-space: pre-wrap; word-break: break-word;
+  }
+  .log .node-name { color: #7dd3fc; font-weight: 700; }
+  .log .ok { color: #4ade80; }
+  .log .err { color: #f87171; }
+  .log .warn { color: #fbbf24; }
+  .log .dim { color: #94a3b8; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+  .callout { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 10px; padding: 12px 16px; font-size: 13px; margin-bottom: 20px; }
+
+  @media (max-width: 640px) {
+    body { padding: 16px 12px; }
+    .header, .panel, .tabs { padding-left: 20px; padding-right: 20px; }
+    .radio-group { flex-direction: column; gap: 12px; }
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="container">
+    <div class="header">
+      <h1>📡 Автоматизация процессов (Альфа-имена)</h1>
+      <p>Браузерная версия n8n-workflow «Автоматизация процессов (Альфа-имена) — оптимизированная»:
+         приём заявки → валидация → согласование менеджером → реестр, карточка заявки, файлы операторов, уведомления.</p>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="client">1. Заявка клиента</button>
+      <button class="tab" data-tab="manager">2. Согласование (менеджер)</button>
+      <button class="tab" data-tab="weekend">3. Закрытие недели</button>
+    </div>
+  </div>
+
+  <!-- ==================== ВКЛАДКА 1: ФОРМА КЛИЕНТА ==================== -->
+  <div class="container panel-wrap" id="tab-client">
+    <div class="panel">
+      <div class="callout">⚠️ Демо-режим по умолчанию: вместо реальных вызовов Google/Telegram логируется ход выполнения
+        (консоль операций ниже). Реальные вызовы API включаются константой <code>USE_REAL_API_CALLS</code> в начале скрипта.</div>
+      <form id="alphaForm" novalidate>
+        <div class="section">
+          <div class="section-title">Основная информация</div>
+
+          <div class="field" id="field-action">
+            <label>Действие <span class="required">*</span></label>
+            <div class="radio-group">
+              <div class="radio-option">
+                <input type="radio" name="action" id="action-connect" value="Подключение" checked>
+                <label for="action-connect">➕ Подключение</label>
+              </div>
+              <div class="radio-option">
+                <input type="radio" name="action" id="action-disconnect" value="Отключение">
+                <label for="action-disconnect">➖ Отключение</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field" id="field-senderName">
+            <label for="senderName">Имя отправителя / Заголовки <span class="required">*</span></label>
+            <input type="text" id="senderName" name="senderName" placeholder="Kazinfoteh" maxlength="11" required>
+            <div class="counter"><span id="senderName-count">0</span>/11</div>
+            <div class="hint">Только латинские буквы и пробелы, до 11 символов</div>
+            <div class="error-msg"></div>
+          </div>
+
+          <div class="field" id="field-companyName">
+            <label for="companyName">Название компании / бренда <span class="required">*</span></label>
+            <input type="text" id="companyName" name="companyName" placeholder="ТОО Kazinfoteh" maxlength="300" required>
+            <div class="error-msg"></div>
+          </div>
+
+          <div class="field" id="field-bin">
+            <label for="bin">БИН компании <span class="required">*</span></label>
+            <input type="text" id="bin" name="bin" placeholder="123456789012" maxlength="12" required inputmode="numeric">
+            <div class="hint">Ровно 12 цифр</div>
+            <div class="error-msg"></div>
+          </div>
+        </div>
+
+        <div id="connect-only-section">
+          <div class="section">
+            <div class="section-title">О компании</div>
+            <div class="grid-2">
+              <div class="field" id="field-activity">
+                <label for="activity">Описание деятельности <span class="required">*</span></label>
+                <textarea id="activity" name="activity" placeholder="Предоставление SMS-рассылок" required></textarea>
+                <div class="error-msg"></div>
+              </div>
+              <div class="field" id="field-website">
+                <label for="website">Сайт компании / ссылка на приложение <span class="required">*</span></label>
+                <input type="url" id="website" name="website" placeholder="https://example.com" value="https://" required>
+                <div class="error-msg"></div>
+              </div>
+              <div class="field" id="field-trafficProof">
+                <label for="trafficProof">Подтверждение трафика</label>
+                <input type="text" id="trafficProof" name="trafficProof" placeholder="Instagram / website / proofs">
+              </div>
+              <div class="field" id="field-countriesCount">
+                <label for="countriesCount">Количество стран присутствия бренда</label>
+                <input type="number" id="countriesCount" name="countriesCount" placeholder="1" min="1">
+              </div>
+              <div class="field" id="field-headquarters">
+                <label for="headquarters">Географическое нахождение штаб-квартиры <span class="required">*</span></label>
+                <input type="text" id="headquarters" name="headquarters" placeholder="Казахстан, г. Алматы" required>
+                <div class="error-msg"></div>
+              </div>
+              <div class="field" id="field-legalAddress">
+                <label for="legalAddress">Юридический адрес компании <span class="required">*</span></label>
+                <input type="text" id="legalAddress" name="legalAddress" placeholder="г. Алматы, ул. ..." required>
+                <div class="error-msg"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">История бренда</div>
+            <div class="grid-2">
+              <div class="field" id="field-foundationDate">
+                <label for="foundationDate">Дата основания бренда / компании <span class="required">*</span></label>
+                <input type="date" id="foundationDate" name="foundationDate" required>
+                <div class="error-msg"></div>
+              </div>
+              <div class="field" id="field-foundationCountry">
+                <label for="foundationCountry">Страна, где основан бренд</label>
+                <input type="text" id="foundationCountry" name="foundationCountry" placeholder="Казахстан">
+              </div>
+              <div class="field" id="field-kzMarketSince">
+                <label for="kzMarketSince">Период работы на рынке Казахстана</label>
+                <input type="text" id="kzMarketSince" name="kzMarketSince" placeholder="с 2008">
+              </div>
+              <div class="field" id="field-founders">
+                <label for="founders">Учредительный состав</label>
+                <input type="text" id="founders" name="founders" placeholder="Александр Александрович">
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Технические детали</div>
+            <div class="grid-2">
+              <div class="field" id="field-sampleSms">
+                <label for="sampleSms">Образец текста SMS <span class="required">*</span></label>
+                <input type="text" id="sampleSms" name="sampleSms" placeholder="Ваш код: 1234" required>
+                <div class="error-msg"></div>
+              </div>
+              <div class="field" id="field-serverIp">
+                <label for="serverIp">IP-адрес серверов</label>
+                <input type="text" id="serverIp" name="serverIp" placeholder="191.292.499.2">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn" id="submitClientBtn">Отправить заявку</button>
+      </form>
+
+      <div id="clientResult" class="result"></div>
+      <div id="clientLog" class="log hidden"></div>
+    </div>
+  </div>
+
+  <!-- ==================== ВКЛАДКА 2: СОГЛАСОВАНИЕ МЕНЕДЖЕРОМ ==================== -->
+  <div class="container panel-wrap hidden" id="tab-manager">
+    <div class="panel">
+      <div id="loadError" class="result error">
+        <h3>⚠️ Не удалось загрузить заявку</h3>
+        <p>Ссылка повреждена или устарела. Сначала отправьте заявку на вкладке «Заявка клиента» — она появится здесь для согласования.</p>
+      </div>
+
+      <form id="approvalForm" class="hidden" novalidate>
+        <div class="section">
+          <div class="section-title">Данные заявки</div>
+          <table class="data-table">
+            <tbody>
+              <tr><th>ID заявки</th><td id="viewRequestId">—</td></tr>
+              <tr><th>Альфа-имя</th><td id="viewSenderName">—</td></tr>
+              <tr><th>Компания</th><td id="viewCompanyName">—</td></tr>
+              <tr><th>БИН</th><td id="viewBin">—</td></tr>
+              <tr><th>Действие клиента</th><td><span class="badge" id="viewClientAction">—</span></td></tr>
+              <tr><th>Заявка создана</th><td id="viewCreatedAt">—</td></tr>
+              <tr><th>Описание деятельности</th><td id="viewActivity">—</td></tr>
+              <tr><th>Сайт компании</th><td id="viewWebsite">—</td></tr>
+              <tr><th>Подтверждение трафика</th><td id="viewTrafficProof">—</td></tr>
+              <tr><th>Количество стран</th><td id="viewCountriesCount">—</td></tr>
+              <tr><th>Штаб-квартира</th><td id="viewHeadquarters">—</td></tr>
+              <tr><th>Юридический адрес</th><td id="viewLegalAddress">—</td></tr>
+              <tr><th>Дата основания</th><td id="viewFoundationDate">—</td></tr>
+              <tr><th>Страна основания</th><td id="viewFoundationCountry">—</td></tr>
+              <tr><th>Работа на рынке КЗ</th><td id="viewKzMarketSince">—</td></tr>
+              <tr><th>Учредители</th><td id="viewFounders">—</td></tr>
+              <tr><th>Образец SMS</th><td id="viewSampleSms">—</td></tr>
+              <tr><th>IP-адрес серверов</th><td id="viewServerIp">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Решение</div>
+          <div class="field" id="field-decision">
+            <label for="decision">Статус согласования <span class="required">*</span></label>
+            <select id="decision" name="decision" required>
+              <option value="">— выберите решение —</option>
+              <option value="Согласовать">✅ Согласовать</option>
+              <option value="Отклонить">❌ Отклонить</option>
+            </select>
+            <div class="error-msg"></div>
+          </div>
+          <div class="field" id="field-comment">
+            <label for="comment">Комментарий менеджера <span class="required hidden" id="commentReq">*</span></label>
+            <textarea id="comment" name="comment" placeholder="Причина отклонения или дополнительные сведения..."></textarea>
+            <div class="hint">Обязателен при отклонении заявки</div>
+          </div>
+        </div>
+
+        <div id="approveSection" class="hidden">
+          <div class="section">
+            <div class="section-title">Параметры подключения</div>
+
+            <div class="field" id="field-mgrAction">
+              <label>Действие <span class="required">*</span></label>
+              <div class="radio-group">
+                <div class="radio-option">
+                  <input type="radio" name="mgrAction" id="mgrAction-connect" value="Подключение">
+                  <label for="mgrAction-connect">➕ Подключение</label>
+                </div>
+                <div class="radio-option">
+                  <input type="radio" name="mgrAction" id="mgrAction-disconnect" value="Отключение">
+                  <label for="mgrAction-disconnect">➖ Отключение</label>
+                </div>
+              </div>
+              <div class="hint">По умолчанию — как указал клиент, при необходимости измените</div>
+              <div class="error-msg"></div>
+            </div>
+
+            <div class="field" id="field-trafficType">
+              <label>Тип трафика <span class="required">*</span></label>
+              <div class="radio-group">
+                <div class="radio-option">
+                  <input type="radio" name="trafficType" id="traffic-local" value="Локал">
+                  <label for="traffic-local">🏠 Локал</label>
+                </div>
+                <div class="radio-option">
+                  <input type="radio" name="trafficType" id="traffic-intl" value="Межнар">
+                  <label for="traffic-intl">🌍 Межнар</label>
+                </div>
+              </div>
+              <div class="error-msg"></div>
+            </div>
+
+            <div class="field" id="field-operators">
+              <label>Оператор(ы) <span class="required">*</span></label>
+              <div class="checkbox-group">
+                <div class="checkbox-option"><input type="checkbox" name="operators" id="op-kcell" value="Kcell"><label for="op-kcell">Kcell</label></div>
+                <div class="checkbox-option"><input type="checkbox" name="operators" id="op-beeline" value="Beeline"><label for="op-beeline">Beeline</label></div>
+                <div class="checkbox-option"><input type="checkbox" name="operators" id="op-mts" value="MTS"><label for="op-mts">MTS</label></div>
+              </div>
+              <div class="hint">Можно выбрать несколько операторов</div>
+              <div class="error-msg"></div>
+            </div>
+
+            <div class="field hidden" id="field-connectionDate">
+              <label for="connectionDate">Дата подключения <span class="required">*</span></label>
+              <input type="date" id="connectionDate" name="connectionDate">
+              <div class="hint">Не может быть раньше сегодняшнего дня и не может выпадать на выходной (сб/вс)</div>
+              <div class="error-msg"></div>
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn" id="submitManagerBtn">Отправить решение</button>
+      </form>
+
+      <div id="managerResult" class="result"></div>
+      <div id="managerLog" class="log hidden"></div>
+    </div>
+  </div>
+
+  <!-- ==================== ВКЛАДКА 3: ЗАКРЫТИЕ НЕДЕЛИ ==================== -->
+  <div class="container panel-wrap hidden" id="tab-weekend">
+    <div class="panel">
+      <div class="section">
+        <div class="section-title">Ручной запуск: закрытие недели</div>
+        <p style="font-size:14px;color:#64748b;margin-bottom:16px;">
+          Узлы «Список документов текущей недели» → «Поиск документа текущей недели» →
+          «Подстановка дат недели и конца месяца»: заменяет плейсхолдеры <code>{{data}}</code> и <code>{{endmonth}}</code>
+          в недельных документах операторов.</p>
+        <button class="btn" id="runWeekEndBtn">Запустить закрытие недели</button>
+      </div>
+      <div id="weekendResult" class="result"></div>
+      <div id="weekendLog" class="log hidden"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================================
+ * ⚠️ БЕЗОПАСНОСТЬ (ВАЖНО!)
+ * ----------------------------------------------------------------------------
+ * Этот файл переносит серверный n8n-workflow в браузер. Все запросы к
+ * Google Drive / Sheets / Docs API и Telegram Bot API выполняются НА КЛИЕНТЕ,
+ * что НЕБЕЗОПАСНО: секретные ключи видны любому посетителю страницы.
+ * Для продакшена такие вызовы должны идти через собственный backend-прокси,
+ * который хранит секреты на сервере.
+ *
+ * Также учтите: большинство Google/Telegram API НЕ поддерживают CORS для
+ * произвольных origin'ов — прямые fetch()-запросы из браузера могут блокироваться.
+ * Поэтому по умолчанию включён ДЕМО-РЕЖИМ (USE_REAL_API_CALLS = false):
+ * вся бизнес-логика workflow выполняется честно, а «действия узлов»
+ * (запись в Sheets, копирование файлов из шаблонов, batchUpdate в Docs,
+ * сообщения в Telegram) симулируются и выводятся в консоль операций.
+ * ==========================================================================*/
+
+// ===== СЕКРЕТЫ И КОНФИГУРАЦИЯ (вынесены сюда, чтобы их было легко найти) =====
+const CONFIG = {
+  USE_REAL_API_CALLS: false,            // true — выполнять реальные fetch-запросы (см. предупреждение выше)
+
+  // TODO: заменить на реальные токены (НЕБЕЗОПАСНО на клиенте!)
+  TELEGRAM_BOT_TOKEN: 'REPLACE_WITH_TELEGRAM_BOT_TOKEN',
+  GOOGLE_ACCESS_TOKEN: 'REPLACE_WITH_GOOGLE_OAUTH_ACCESS_TOKEN',
+
+  TELEGRAM_CHAT_ID: '-1003645879005',   // чат администраторов/менеджеров
+
+  // Базовый URL для ссылки согласования (в оригинале — https://kazinfoteh.app.n8n.cloud)
+  APPROVAL_BASE_URL: window.location.origin + window.location.pathname,
+
+  // ID документов/папок/шаблонов из workflow
+  REGISTRY_SPREADSHEET_ID: '18yzroIyACao83Qlo7PWqVQiAjbmcve3zmtp4tuee8Io',
+  REQUEST_CARD_TEMPLATE_ID: '104jscJ1aZnzidQbMmDHgBV9297OO5xmv3SrkHFnswF0',
+  REQUEST_CARD_FOLDER_ID: '1GBNe5QHJR5H47N7MXhJIVa1jUNJzaiCm',
+
+  FOLDER_BEELINE: '1xh4aibtxQLJ5WPNDkwBRd3924qqLDHBQ',
+  FOLDER_MTS:     '1QgX04z5cRWR1wlDn_8-kOBRJK-76HsYT',
+  FOLDER_KCELL:   '1Cz2jsdbaIIrSpyK8Oho077UMx2uRjVMP',
+
+  TEMPLATE_BEELINE_LOCAL:   '1rxKrviDc0eokW7qwHRBn1oeWg1PWI29z0lXmZpIaftI',
+  TEMPLATE_BEELINE_INTL:    '1eB3GZ7c6P3my9nfs2BX2uIszsz2xbekPGFtsNTKkdow',
+  TEMPLATE_MTS_NO_STAMP:    '1yj5BeZfjFatx9w2GaI0RFi9lCWBK6G-Xk2XH1qcIKMg',
+  TEMPLATE_MTS_WITH_STAMP:  '1IKuEzHassviYAxHrrtr8U6XN8WSwLXuRz1vYsaFwZRs',
+  TEMPLATE_KCELL_LOCAL:     '1IvFO7REd85xeuSdeubVTkh4qb1Ea3d1xAzwEXiW6vFA',
+  TEMPLATE_KCELL_STAMP:     '1GPJ9SJY9Ynpc0ITJ2Xg9xlHPX6I4_V5ainUli-Jz58U',
+  TEMPLATE_KCELL_INTL:      '1iZGJpCMP_JoN2ephftaCjvISpXu24Ri-3DNeBLhhT6M',
+};
+
+const STORAGE_KEYS = { pending: 'alphanames_pending_requests', registry: 'alphanames_registry' };
+
+/* ============================================================================
+ * УТИЛИТЫ ДАТЫ/ВРЕМЕНИ (аналоги Luxon DateTime / $today из n8n)
+ * ==========================================================================*/
+function pad(n, len = 2) { return String(n).padStart(len, '0'); }
+
+// "Текущий момент по Алматы" — стабильный UTC+5 без DST (как Asia/Almaty с 2024 г.)
+function nowAlmaty() { return new Date(Date.now() + 5 * 3600 * 1000); }
+function almatyParts(d = nowAlmaty()) {
+  return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), hour: d.getUTCHours(), weekday: d.getUTCDay() };
+}
+function almatyISODate(d = nowAlmaty()) { const p = almatyParts(d); return `${p.y}-${pad(p.m)}-${pad(p.d)}`; }
+// weekday по ISO: 1=пн ... 7=вс (как Luxon)
+function almatyIsoWeekday(d = nowAlmaty()) { const w = almatyParts(d).weekday; return w === 0 ? 7 : w; }
+function addDays(isoDate, days) {
+  const [y, m, dd] = isoDate.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, dd + days));
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+}
+// Понедельник текущей недели (аналог $today.minus({days: weekday-1}))
+function currentWeekStart() {
+  const p = almatyParts();
+  const isoWd = almatyIsoWeekday();
+  const monday = new Date(Date.UTC(p.y, p.m - 1, p.d - (isoWd - 1)));
+  return `${monday.getUTCFullYear()}-${pad(monday.getUTCMonth() + 1)}-${pad(monday.getUTCDate())}`;
+}
+// Последний рабочий день месяца (сб/вс -> предыдущая пятница)
+function lastWorkingDayOfMonth() {
+  const p = almatyParts();
+  const lastDay = new Date(Date.UTC(p.y, p.m, 0)); // endOf('month')
+  let wd = lastDay.getUTCDay(); if (wd === 0) wd = 7;
+  let sub = 0;
+  if (wd === 6) sub = 1;
+  if (wd === 7) sub = 2;
+  lastDay.setUTCDate(lastDay.getUTCDate() - sub);
+  return `${lastDay.getUTCFullYear()}-${pad(lastDay.getUTCMonth() + 1)}-${pad(lastDay.getUTCDate())}`;
+}
+
+/* ============================================================================
+ * ЛОГАНИЕ ВЫПОЛНЕНИЯ УЗЛОВ (имитация передачи данных между нодами n8n)
+ * ==========================================================================*/
+function makeLogger(el) {
+  el.classList.remove('hidden');
+  el.textContent = '';
+  return (name, msg, cls = '') => {
+    const line = document.createElement('div');
+    line.innerHTML = `<span class="node-name">[${name}]</span> <span class="${cls}">${msg}</span>`;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+  };
+}
+
+/* ============================================================================
+ * СЕРВИСНЫЕ "УЗЛЫ": Google Drive / Sheets / Docs / Telegram
+ * В демо-режиме симулируются; при USE_REAL_API_CALLS=true идут fetch()-запросы.
+ * ⚠️ Реальные вызовы из браузера скорее всего упадут из-за CORS/OAuth —
+ *    см. предупреждение в начале файла.
+ * ==========================================================================*/
+async function gFetch(url, options = {}) {
+  const headers = Object.assign({ Authorization: 'Bearer ' + CONFIG.GOOGLE_ACCESS_TOKEN }, options.headers || {});
+  const res = await fetch(url, Object.assign({}, options, { headers }));
+  if (!res.ok) throw new Error(`Google API ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// googleDrive.search (query) -> [{id, name}]
+async function driveSearch(query, folderId, log) {
+  if (!CONFIG.USE_REAL_API_CALLS) {
+    log('googleDrive.search', `query="${query}" в папке ${folderId} → <span class="dim">[демо] файл не найден (будет создан из шаблона)</span>`);
+    return [];
+  }
+  const q = encodeURIComponent(`${query} and '${folderId}' in parents and trashed=false`);
+  const data = await gFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1`);
+  return data.files || [];
+}
+
+// googleDrive.copy (создание из шаблона) -> {id}
+async function driveCopy(templateId, name, folderId, log) {
+  if (!CONFIG.USE_REAL_API_CALLS) {
+    const fakeId = 'demo_' + Math.random().toString(36).slice(2, 12);
+    log('googleDrive.copy', `Шаблон ${templateId} → копия «${name}» в папке ${folderId} → <span class="dim">[демо] id=${fakeId}</span>`);
+    return { id: fakeId };
+  }
+  return gFetch(`https://www.googleapis.com/drive/v3/files/${templateId}/copy`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, parents: [folderId] })
+  });
+}
+
+// googleSheets.append / appendOrUpdate
+async function sheetsAppend(spreadsheetId, sheetName, values, log, mode = 'append', matchColumn = null) {
+  if (!CONFIG.USE_REAL_API_CALLS) {
+    log('googleSheets.' + mode, `Документ ${spreadsheetId}, лист «${sheetName}» → <span class="dim">[демо]</span> ${JSON.stringify(values)}`);
+    return { updated: true };
+  }
+  const range = encodeURIComponent(`${sheetName}!A1`);
+  if (mode === 'append') {
+    return gFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [values] }) });
+  }
+  // appendOrUpdate по matchColumn — упрощённо: читаем столбец, ищем совпадение, обновляем/добавляем
+  const read = await gFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`);
+  const rows = read.values || [];
+  const idx = rows.findIndex(r => String(r[0]) === String(values[0]));
+  if (idx >= 0) {
+    const updRange = encodeURIComponent(`${sheetName}!A${idx + 1}`);
+    return gFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${updRange}?valueInputOption=USER_ENTERED`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [values] }) });
+  }
+  return gFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [values] }) });
+}
+
+// googleDocs.get -> содержимое документа (для анализа таблиц)
+async function docsGet(documentId, log) {
+  if (!CONFIG.USE_REAL_API_CALLS) {
+    // Демо-документ: одна таблица с 2 строками, последняя строка ПУСТАЯ (готов слот для вставки)
+    const mkCell = (txt) => ({ startIndex: 0, endIndex: 0, content: [{ paragraph: { elements: [{ textRun: { content: txt } }] } }] });
+    log('googleDocs.get', `Чтение документа ${documentId} → <span class="dim">[демо] шаблонная таблица №1–2 со свободной строкой</span>`);
+    return {
+      documentId,
+      tabs: [{ tabProperties: { tabId: 't.0' }, documentTab: { body: { content: [
+        { table: { startIndex: 100, tableRows: [
+          { tableCells: [{ startIndex: 101, content: [{ paragraph: { elements: [{ textRun: { content: 'заголовок' } }] } }] }] },
+          { tableCells: [mkCell(''), mkCell(''), mkCell(''), mkCell(''), mkCell(''), mkCell(''), mkCell('')] }
+        ] } }
+      ] } } }]
+    };
+  }
+  return gFetch(`https://docs.googleapis.com/v1/documents/${documentId}`);
+}
+
+// httpRequest POST docs batchUpdate
+async function docsBatchUpdate(documentId, body, log) {
+  if (!CONFIG.USE_REAL_API_CALLS) {
+    log('httpRequest (Docs batchUpdate)', `POST .../documents/${documentId}:batchUpdate → <span class="dim">[демо] ${body.requests.length} запрос(ов) выполнено “успешно”</span>`);
+    return { replies: body.requests.map(() => ({})) };
+  }
+  return gFetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+}
+
+// docs replaceAll (узел «Подстановка дат недели и конца месяца»)
+async function docsReplaceAll(documentId, replacements, log) {
+  if (!CONFIG.USE_REAL_API_CALLS) {
+    log('googleDocs.update(replaceAll)', `${documentId}: <span class="dim">[демо]</span> ` + replacements.map(r => `"${r.text}" → "${r.replaceText}"`).join(', '));
+    return {};
+  }
+  const requests = replacements.map(r => ({ replaceAllText: { containsText: { text: r.text, matchCase: true }, replaceText: r.replaceText } }));
+  return gFetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests })
+  });
+}
+
+// telegram.sendMessage
+async function telegramSend(text, log, inlineButton = null) {
+  if (!CONFIG.USE_REAL_API_CALLS) {
+    log('telegram', `chatId=${CONFIG.TELEGRAM_CHAT_ID} → <span class="dim">[демо] сообщение:</span>\n` +
+      text.split('\n').map(l => '&nbsp;&nbsp;' + l).join('\n') +
+      (inlineButton ? `\n&nbsp;&nbsp;🔘 [${inlineButton.text}](${inlineButton.url})` : ''));
+    return { ok: true };
+  }
+  const payload = { chat_id: CONFIG.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true };
+  if (inlineButton) {
+    payload.reply_markup = { inline_keyboard: [[{ text: inlineButton.text, url: inlineButton.url }]] };
+  }
+  const res = await fetch(`https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error('Telegram API: ' + json.description);
+  return json;
+}
+
+/* ============================================================================
+ * ХРАНИЛИЩЕ (замена состояний n8n между execution'ами)
+ * ==========================================================================*/
+function savePendingRequest(request) {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(STORAGE_KEYS.pending) || '[]'); } catch (e) { list = []; }
+  list.unshift(request);
+  localStorage.setItem(STORAGE_KEYS.pending, JSON.stringify(list.slice(0, 20)));
+}
+function getPendingRequests() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.pending) || '[]'); } catch (e) { return []; }
+}
+function removePendingRequest(requestId) {
+  const list = getPendingRequests().filter(r => r.requestId !== requestId);
+  localStorage.setItem(STORAGE_KEYS.pending, JSON.stringify(list));
+}
+
+/* ============================================================================
+ * ЦЕПОЧКА 1: Приём заявки клиента
+ * 00b Webhook POST → 02 Generate Request ID → 03 Normalize Input →
+ * → 04 Validate Request → 05 Заявка валидна? → (07|06 Ответ) →
+ * → 08 Подготовка ссылки согласования → 08a Уведомление менеджеру (Telegram)
+ * ==========================================================================*/
+
+// === 02 Generate Request ID ===
+function nodeGenerateRequestId(body) {
+  const now = new Date();
+  const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+  const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const requestId = `ALPHA-${datePart}-${timePart}-${randomPart}`;
+  return { ...body, requestId, createdAt: now.toISOString(), updatedAt: now.toISOString(), status: 'RECEIVED' };
+}
+
+// === 03 Normalize Input ===
+function nodeNormalizeInput(f) {
+  function stripInvisible(v) {
+    if (v === undefined || v === null) return '';
+    return String(v).replace(/^[\n\r\t]+|[\n\r\t]+$/g, '');
+  }
+  function safeTrim(v) {
+    if (v === undefined || v === null) return '';
+    return String(v).trim();
+  }
+  const normalized = {
+    action: safeTrim(f.action),
+    senderName: stripInvisible(f.senderName),
+    companyName: safeTrim(f.companyName),
+    bin: safeTrim(f.bin),
+    activity: safeTrim(f.activity),
+    website: safeTrim(f.website),
+    trafficProof: safeTrim(f.trafficProof),
+    countriesCount: safeTrim(f.countriesCount),
+    headquarters: safeTrim(f.headquarters),
+    legalAddress: safeTrim(f.legalAddress),
+    foundationDate: safeTrim(f.foundationDate),
+    foundationCountry: safeTrim(f.foundationCountry),
+    kzMarketSince: safeTrim(f.kzMarketSince),
+    founders: safeTrim(f.founders),
+    sampleSms: safeTrim(f.sampleSms),
+    serverIp: safeTrim(f.serverIp),
+    dateToday: new Date().toISOString().split('T')[0],
+  };
+  return {
+    requestId: f.requestId, createdAt: f.createdAt, updatedAt: new Date().toISOString(),
+    status: 'RECEIVED', client: normalized,
+  };
+}
+
+// === 04 Validate Request ===
+function nodeValidateRequest(data) {
+  const c = data.client;
+  const errors = [];
+  if (!c.action || !['Подключение', 'Отключение'].includes(c.action)) {
+    errors.push('Ошибка в поле «Действие»: выберите «Подключение» или «Отключение».');
+  }
+  const isDisconnect = c.action === 'Отключение';
+  const senderNamePattern = /^[A-Za-z ]{1,11}$/;
+  if (!c.senderName) {
+    errors.push('Ошибка в поле «Имя отправителя/Заголовки»: поле обязательно для заполнения.');
+  } else if (!senderNamePattern.test(c.senderName)) {
+    errors.push('Ошибка в поле «Имя отправителя/Заголовки»: значение должно содержать не более 11 символов и состоять только из латинских букв и пробелов.');
+  }
+  const binPattern = /^[0-9]{12}$/;
+  if (!c.bin) {
+    errors.push('Ошибка в поле «БИН компании»: поле обязательно для заполнения.');
+  } else if (!binPattern.test(c.bin)) {
+    errors.push('Ошибка в поле «БИН компании»: БИН должен содержать ровно 12 цифр.');
+  }
+  if (!c.companyName || c.companyName.trim().length === 0) {
+    errors.push('Ошибка в поле «Название компании/бренда Клиента»: поле обязательно для заполнения.');
+  } else if (c.companyName.length > 300) {
+    errors.push('Ошибка в поле «Название компании/бренда Клиента»: превышена максимальная длина (300 символов).');
+  }
+  if (!isDisconnect) {
+    if (!c.legalAddress || c.legalAddress.trim().length === 0) {
+      errors.push('Ошибка в поле «Юр. адрес компании»: поле обязательно для заполнения.');
+    } else if (c.legalAddress.length > 500) {
+      errors.push('Ошибка в поле «Юр. адрес компании»: превышена максимальная длина (500 символов).');
+    }
+    if (!c.activity) errors.push('Ошибка в поле «Описание деятельности»: поле обязательно для заполнения.');
+    if (!c.website) errors.push('Ошибка в поле «Сайт Компании / ссылка на приложение»: поле обязательно для заполнения.');
+    if (!c.headquarters) errors.push('Ошибка в поле «Географическое нахождение штаб-квартиры Бренда»: поле обязательно для заполнения.');
+    if (!c.foundationDate) errors.push('Ошибка в поле «Дата основания Бренда либо компании Клиента»: поле обязательно для заполнения.');
+    if (!c.sampleSms) errors.push('Ошибка в поле «Образец текста смс»: поле обязательно для заполнения.');
+  }
+  return {
+    ...data,
+    status: errors.length ? 'INVALID' : 'VALIDATED',
+    updatedAt: new Date().toISOString(),
+    validationErrors: errors,
+  };
+}
+
+// === 08 Подготовка ссылки согласования ===
+// В n8n использовался Buffer; в браузере — эквивалентное base64-кодирование UTF-8.
+function utf8ToB64(str) {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(str)));
+}
+function b64ToUtf8(b64) {
+  return new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+}
+function nodePrepareApprovalLink(item) {
+  const payload = { requestId: item.requestId, createdAt: item.createdAt, client: item.client };
+  const encoded = utf8ToB64(JSON.stringify(payload));
+  const reqParam = encodeURIComponent(encoded);
+  const approvalUrl = `${CONFIG.APPROVAL_BASE_URL}?tab=manager&req=${reqParam}`;
+  return { ...item, approvalUrl };
+}
+
+async function handleClientSubmit(formData, log) {
+  // 00b Webhook POST (приём данных)
+  log('00b Webhook POST (приём данных)', 'Получены данные формы клиента');
+  // 02 Generate Request ID
+  let json = nodeGenerateRequestId(formData);
+  log('02 Generate Request ID', `Создан ID заявки: <b>${json.requestId}</b>, статус RECEIVED`, 'ok');
+  // 03 Normalize Input
+  json = nodeNormalizeInput(json);
+  log('03 Normalize Input', 'Данные нормализованы (trim/strip невидимых символов)');
+  // 04 Validate Request
+  json = nodeValidateRequest(json);
+  log('04 Validate Request', `Валидация: ${json.validationErrors.length ? json.validationErrors.length + ' ошибок' : 'без ошибок'}`, json.validationErrors.length ? 'err' : 'ok');
+  // 05 Заявка валидна? (if)
+  if (json.validationErrors.length !== 0) {
+    // 06 Ответ с ошибками клиенту
+    log('06 Ответ с ошибками клиенту', JSON.stringify({ success: false, errors: json.validationErrors }), 'err');
+    return { success: false, errors: json.validationErrors };
+  }
+  // 07 Ответ об успехе клиенту
+  log('07 Ответ об успехе клиенту', JSON.stringify({ success: true, requestId: json.requestId, message: 'Заявка принята' }), 'ok');
+  // 08 Подготовка ссылки согласования
+  json = nodePrepareApprovalLink(json);
+  log('08 Подготовка ссылки согласования', 'Заявка закодирована в base64, сформирована ссылка согласования');
+  // 08a Уведомление менеджеру (Telegram)
+  const tgText = `🆕 Новая заявка на альфа-имя!\n\n` +
+    `📋 ID: ${json.requestId}\n` +
+    `🏷 Альфа-имя: ${json.client.senderName}\n` +
+    `🏢 Компания: ${json.client.companyName}\n` +
+    `🔢 БИН: ${json.client.bin}\n` +
+    `⚡ Действие: ${json.client.action}\n\n` +
+    `👉 Нажмите кнопку ниже, чтобы перейти к согласованию:`;
+  await telegramSend(tgText, log, { text: 'Открыть форму согласования', url: json.approvalUrl });
+  savePendingRequest(json);
+  return { success: true, requestId: json.requestId, approvalUrl: json.approvalUrl };
+}
+
+/* ============================================================================
+ * ЦЕПОЧКА 2: Решение менеджера
+ * 09b Webhook POST → 09c Проверка решения и даты → 09d Решение валидно? →
+ * → (09f Ответ менеджеру | 09e Ответ с ошибкой) →
+ * → Проверка и подготовка заявки → Статус заявки (switch):
+ *    [Согласовано] → Запись в реестр заявок
+ *                 → Создание карточки заявки из шаблона → Строки карточки → Заполнение карточки
+ *                 → План документов по операторам → Цикл по документам операторов (loop):
+ *                       Поиск файла недели → Файл недели уже создан? (if) →
+ *                         [нет] Создание файла недели из шаблона → Тип файла оператора (switch)
+ *                         [да]  Тип файла оператора (switch)
+ *                           ├─ doc:         Чтение документа → Анализ таблицы → batchUpdate → Строка заполнена? (if: повтор чтения)
+ *                           ├─ beelineSheet: Beeline Межнар: подключение? → запись на подключение/отключение
+ *                           └─ kcellSheet:   Kcell Межнар: строки анкеты → заполнение анкеты
+ *                       → (возврат в цикл) → Итоговое уведомление о заявке
+ *    [Отклонено]   → Уведомление: заявка отклонена
+ * ==========================================================================*/
+
+// === 09c Проверка решения и даты ===
+function nodeCheckDecision(body) {
+  const errors = [];
+  let request = null;
+  try {
+    const decoded = b64ToUtf8(decodeURIComponent(body.req || ''));
+    request = JSON.parse(decoded);
+    if (!request || !request.client || !request.requestId) throw new Error('bad shape');
+  } catch (e) {
+    return { success: false, errors: ['Не удалось прочитать данные заявки. Ссылка повреждена или устарела.'] };
+  }
+
+  const decision = String(body.decision || '').trim();
+  const comment = String(body.comment || '').trim();
+  const action = String(body.action || '').trim();
+  const trafficType = String(body.trafficType || '').trim();
+  const connectionDate = body.connectionDate ? String(body.connectionDate).trim() : '';
+  let operators = [];
+  if (Array.isArray(body.operators)) operators = body.operators;
+  else if (typeof body.operators === 'string' && body.operators) operators = body.operators.split(',').map(s => s.trim()).filter(Boolean);
+
+  if (!decision || !['Согласовать', 'Отклонить'].includes(decision)) {
+    errors.push('Укажите решение по заявке (Согласовать/Отклонить).');
+  }
+  if (decision === 'Отклонить' && !comment) {
+    errors.push('При отклонении заявки укажите комментарий.');
+  }
+  if (decision === 'Согласовать') {
+    if (!action || !['Подключение', 'Отключение'].includes(action)) {
+      errors.push('Укажите действие: Подключение или Отключение.');
+    }
+    if (!trafficType || !['Локал', 'Межнар'].includes(trafficType)) {
+      errors.push('Укажите тип трафика: Локал или Межнар.');
+    }
+    if (operators.length === 0) {
+      errors.push('Выберите хотя бы одного оператора.');
+    }
+    if (action === 'Подключение') {
+      if (!connectionDate) {
+        errors.push('Укажите дату подключения.');
+      } else {
+        const selectedDate = new Date(connectionDate + 'T00:00:00');
+        if (isNaN(selectedDate.getTime())) {
+          errors.push('Некорректная дата подключения.');
+        } else {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selectedDate < today) {
+            errors.push('Дата подключения не может быть в прошлом.');
+          }
+          const dayOfWeek = selectedDate.getDay();
+          if (dayOfWeek === 0 || dayOfWeek === 6) {
+            errors.push('Дата подключения не может быть выходным днем (суббота или воскресенье).');
+          }
+        }
+      }
+    }
+  }
+
+  if (errors.length > 0) return { success: false, errors };
+
+  if (decision === 'Отклонить') {
+    return {
+      ...request,
+      status: 'REJECTED',
+      updatedAt: new Date().toISOString(),
+      approved: false,
+      decision, comment,
+      success: true,
+    };
+  }
+
+  const clientAction = request.client.action;
+  const actionOverridden = Boolean(clientAction && clientAction !== action);
+  return {
+    ...request,
+    status: 'PROCESSING',
+    updatedAt: new Date().toISOString(),
+    approved: true,
+    decision, comment, actionOverridden,
+    routing: { trafficType, action, operators, connectionDate: connectionDate || null },
+    success: true,
+  };
+}
+
+// === Проверка и подготовка заявки ===
+// (DateTime Luxon заменён на эквивалент расчётов по Алматы, UTC+5)
+function nodePrepareRequest(src) {
+  const c = src.client || {};
+  const routing = src.routing || {};
+  const str = (v) => String(v === undefined || v === null ? '' : v).trim();
+
+  const approved = src.approved === true;
+  const status = approved ? 'approved' : 'rejected';
+  const local = str(routing.trafficType);
+  const connection = str(routing.action || c.action);
+  const connectionDate = str(routing.connectionDate);
+  let operators = routing.operators || [];
+  if (!Array.isArray(operators)) operators = operators ? [operators] : [];
+
+  const p = almatyParts();
+  const todayAlmaty = almatyISODate();               // сегодня по Алматы
+  const wd = almatyIsoWeekday();                    // 1 = пн ... 7 = вс
+
+  // Неделя заявки: понедельник (если сегодня пн — сегодня, иначе ближайший следующий пн)
+  const weekStart = (wd === 1 ? todayAlmaty : addDays(todayAlmaty, 8 - wd));
+
+  // MTS: если заявка пришла в понедельник после 16:00 по Алматы — файл следующей недели
+  const mtsLateMonday = (wd === 1 && p.hour >= 16);
+  const weekStartMts = mtsLateMonday ? addDays(todayAlmaty, 7) : weekStart;
+
+  const parts = connectionDate.split('-');
+  const connectionDateRu = parts.length === 3 ? parts[2] + '.' + parts[1] + '.' + parts[0] : connectionDate;
+
+  return {
+    status,
+    decision: str(src.decision),
+    comment: str(src.comment),
+    requestId: str(src.requestId),
+    senderName: str(c.senderName),
+    companyName: str(c.companyName),
+    bin: str(c.bin),
+    activity: str(c.activity),
+    website: str(c.website),
+    trafficProof: str(c.trafficProof),
+    countriesCount: str(c.countriesCount),
+    headquarters: str(c.headquarters),
+    legalAddress: str(c.legalAddress),
+    foundationYear: str(c.foundationDate),
+    foundationCountry: str(c.foundationCountry),
+    kzMarketSince: str(c.kzMarketSince),
+    founders: str(c.founders),
+    sampleSms: str(c.sampleSms),
+    serverIp: str(c.serverIp),
+    requestDate: str(c.dateToday) || todayAlmaty,
+    today: todayAlmaty,
+    local,
+    connection,
+    operators,
+    operatorsText: operators.join(', '),
+    connectionDate,
+    connectionDateRu,
+    weekStart,
+    weekStartMts,
+    mtsMovedToNextWeek: mtsLateMonday && operators.includes('MTS'),
+  };
+}
+
+// === План документов по операторам ===
+function nodeDocumentPlan(r) {
+  const ops = r.operators || [];
+  const isLocal = r.local === 'Локал';
+  const isConnect = r.connection === 'Подключение';
+  const week = r.weekStart;
+  const weekMts = r.weekStartMts || r.weekStart; // MTS: пн после 16:00 (Алматы) — следующая неделя
+
+  const companyBin = r.companyName + '\n' + r.bin;
+  const shortInfo = 'Деятельность: ' + r.activity + '\n' + 'Текст: ' + r.sampleSms;
+  const shortInfoWithSite = 'Деятельность: ' + r.activity + '\n' + 'Сайт: ' + r.website + '\n' + 'Текст: ' + r.sampleSms;
+
+  const targets = [];
+  function add(t) {
+    t.fileName = String(t.fileName).split("'").join('');
+    t.query = "name = '" + t.fileName + "'";
+    targets.push(t);
+  }
+
+  // Beeline
+  if (ops.includes('Beeline')) {
+    if (isLocal) {
+      add({
+        kind: 'doc', operator: 'Beeline Локал',
+        fileName: 'stamp_beeline_' + week, folderId: CONFIG.FOLDER_BEELINE,
+        templateId: CONFIG.TEMPLATE_BEELINE_LOCAL,
+        tableNumber: isConnect ? 1 : 2,
+        cells: isConnect ? [r.senderName, shortInfoWithSite, companyBin] : [r.senderName, companyBin]
+      });
+    } else {
+      add({
+        kind: 'beelineSheet', operator: 'Beeline Межнар',
+        fileName: 'Beeline_межнар_' + week, folderId: CONFIG.FOLDER_BEELINE,
+        templateId: CONFIG.TEMPLATE_BEELINE_INTL,
+        isConnect,
+        row: {
+          date: r.today,
+          foundationCountry: r.foundationCountry,
+          senderName: r.senderName,
+          sampleSms: r.sampleSms,
+          trafficProof: r.trafficProof,
+          companyBin: r.companyName + ' БИН: ' + r.bin
+        }
+      });
+    }
+  }
+
+  // MTS: всегда два документа (без печати и с печатью); таблица 1 — Локал, таблица 2 — Межнар
+  if (ops.includes('MTS')) {
+    const cells = [r.senderName, r.local, 'KazTech Altel kazinfotech2  Tele 2', r.connection, r.connectionDateRu, shortInfo, companyBin];
+    add({ kind: 'doc', operator: 'MTS (без печати)', fileName: 'MTS_without_stamp_' + weekMts, folderId: CONFIG.FOLDER_MTS, templateId: CONFIG.TEMPLATE_MTS_NO_STAMP, tableNumber: isLocal ? 1 : 2, cells });
+    add({ kind: 'doc', operator: 'MTS (с печатью)', fileName: 'MTS_with_stamp_' + weekMts, folderId: CONFIG.FOLDER_MTS, templateId: CONFIG.TEMPLATE_MTS_WITH_STAMP, tableNumber: isLocal ? 1 : 2, cells });
+  }
+
+  // Kcell
+  if (ops.includes('Kcell')) {
+    if (isLocal) {
+      const cells = [r.senderName, 'SMSSMPP 212.124.121.186', r.connection, r.connectionDateRu, shortInfo, companyBin];
+      add({ kind: 'doc', operator: 'Kcell Локал', fileName: 'Kcell_local_' + week, folderId: CONFIG.FOLDER_KCELL, templateId: CONFIG.TEMPLATE_KCELL_LOCAL, tableNumber: 1, cells });
+      add({ kind: 'doc', operator: 'Kcell Локал (с печатью)', fileName: 'Kcell_stamp_' + week, folderId: CONFIG.FOLDER_KCELL, templateId: CONFIG.TEMPLATE_KCELL_STAMP, tableNumber: 1, cells });
+    } else {
+      add({
+        kind: 'kcellSheet', operator: 'Kcell Межнар',
+        fileName: 'Kcell_mezhnar_' + r.connection + '_' + r.senderName + '_' + week, folderId: CONFIG.FOLDER_KCELL,
+        templateId: CONFIG.TEMPLATE_KCELL_INTL,
+        rows: [
+          { option: 'Имя отправителя (Sender Name)', data: r.senderName },
+          { option: 'Название компаниибренда Клиента', data: r.companyName },
+          { option: 'Дата основания Бренда либо компании Клиента', data: r.foundationYear },
+          { option: 'Описание деятельности', data: r.activity },
+          { option: 'Сайт Компании / ссылка на приложение', data: r.website },
+          { option: 'Адрес компании', data: r.headquarters },
+          { option: 'БИН', data: r.bin },
+          { option: 'статус', data: r.connection }
+        ]
+      });
+    }
+  }
+  return targets;
+}
+
+// === Анализ таблицы и подготовка вставки === (точная копия логики n8n Code-узла)
+function analyzeTableAndPrepare(target, doc) {
+  let content = [];
+  let tabId = 't.0';
+  if (doc.tabs && doc.tabs.length > 0) {
+    const tab = doc.tabs[0];
+    tabId = (tab.tabProperties && tab.tabProperties.tabId) || 't.0';
+    content = (tab.documentTab && tab.documentTab.body && tab.documentTab.body.content) || [];
+  } else {
+    content = (doc.body && doc.body.content) || [];
+  }
+
+  const tables = content.filter(el => el.table);
+  const tableEl = tables[target.tableNumber - 1];
+  if (!tableEl) {
+    throw new Error('В документе "' + target.fileName + '" не найдена таблица №' + target.tableNumber);
+  }
+
+  const rows = tableEl.tableRows || [];
+  if (rows.length === 0) throw new Error('В таблице №' + target.tableNumber + ' нет строк');
+  const lastRow = rows[rows.length - 1];
+  const cells = lastRow.tableCells || [];
+
+  const cellText = cell => (cell.content || [])
+    .map(p => ((p.paragraph && p.paragraph.elements) || []).map(e => (e.textRun && e.textRun.content) || '').join(''))
+    .join('');
+  const isLastRowEmpty = cells.every(c => cellText(c).trim() === '');
+
+  const requests = [];
+  if (isLastRowEmpty) {
+    // Вставляем с последней колонки к первой, чтобы индексы не смещались
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const value = target.cells[i];
+      if (value === undefined || value === null || String(value) === '') continue;
+      requests.push({ insertText: { location: { index: cells[i].startIndex + 1, tabId }, text: String(value) } });
+    }
+  } else {
+    // Последняя строка занята — добавляем новую пустую строку под ней
+    requests.push({
+      insertTableRow: {
+        tableCellLocation: { tableStartLocation: { index: tableEl.startIndex, tabId }, rowIndex: rows.length - 1, columnIndex: 0 },
+        insertBelow: true
+      }
+    });
+  }
+  return { documentId: doc.documentId, isLastRowEmpty, body: { requests } };
+}
+
+// === Обработка одного элемента плана ("Цикл по документам операторов") ===
+async function processTarget(target, log) {
+  // Поиск файла недели
+  let found = await driveSearch(target.query, target.folderId, log);
+  // Файл недели уже создан? (if: $json.id notEmpty)
+  let fileId = found.length && found[0].id ? found[0].id : null;
+  if (!fileId) {
+    // Создание файла недели из шаблона
+    const copy = await driveCopy(target.templateId, target.fileName, target.folderId, log);
+    fileId = copy.id;
+  } else {
+    log('Файл недели уже создан?', `«${target.fileName}» найден (id=${fileId}) — создаётся дозапись`, 'ok');
+  }
+
+  // Тип файла оператора (switch по kind)
+  if (target.kind === 'doc') {
+    let attempts = 0;
+    while (true) {
+      // Чтение документа оператора
+      const doc = await docsGet(fileId, log);
+      // Анализ таблицы и подготовка вставки
+      const prepared = analyzeTableAndPrepare(target, doc);
+      log('Анализ таблицы и подготовка вставки', `Таблица №${target.tableNumber}: последняя строка ${prepared.isLastRowEmpty ? 'пустa → вставка текста' : 'занята → новая строка'} (${prepared.body.requests.length} запросов)`);
+      // Обновление таблицы документа (HTTP Request POST batchUpdate)
+      await docsBatchUpdate(prepared.documentId, prepared.body, log);
+      // Строка заполнена? (if isLastRowEmpty) — если строка была занята, цикл повторяется
+      if (prepared.isLastRowEmpty || ++attempts > 1) break;
+      log('Строка заполнена?', 'false → повторно читаем документ и вставляем в новую строку', 'warn');
+    }
+  } else if (target.kind === 'beelineSheet') {
+    // Beeline Межнар: подключение? (if isConnect)
+    if (target.isConnect) {
+      // Запись на подключение (лист «Подключить»)
+      const row = target.row;
+      await sheetsAppend(fileId, 'Подключить',
+        [row.date, row.foundationCountry, 'Beeline', row.senderName, row.sampleSms, row.trafficProof, row.companyBin], log);
+    } else {
+      // Запись на отключение (лист «Отключить»)
+      await sheetsAppend(fileId, 'Отключить', [target.row.senderName, target.row.companyBin], log);
+    }
+  } else if (target.kind === 'kcellSheet') {
+    // Kcell Межнар: строки анкеты → заполнение анкеты
+    for (const r of (target.rows || [])) {
+      await sheetsAppend(fileId, 'Лист1', [r.option, r.data], log);
+    }
+  }
+}
+
+// === Полная обработка согласованной заявки ===
+async function processApprovedRequest(r, log) {
+  // Запись в реестр заявок (googleSheets.append)
+  await sheetsAppend(CONFIG.REGISTRY_SPREADSHEET_ID, 'Sheet1',
+    [r.senderName, r.requestDate, r.connection, r.operatorsText, r.local], log);
+
+  // Создание карточки заявки из шаблона (googleDrive.copy)
+  const cardName = `${r.senderName}_${r.connection}_${r.operatorsText}_${r.local}_${r.requestDate}`;
+  const card = await driveCopy(CONFIG.REQUEST_CARD_TEMPLATE_ID, cardName, CONFIG.REQUEST_CARD_FOLDER_ID, log);
+
+  // Строки карточки заявки (code) → Заполнение карточки заявки (appendOrUpdate по option)
+  const cardRows = [
+    ['Имя отправителя (Sender Name)', r.senderName],
+    ['Название компаниибренда Клиента', r.companyName],
+    ['БИН компании', r.bin],
+    ['Описание деятельности', r.activity],
+    ['Сайт Компанииссылка на приложение', r.website],
+    [' Подтверждение определения трафика ТИП – 1/2 (ссылка на сайт, выписка, скриншот или ссылка на публично доступные в сети Интернет основания, Инстаграм) ', r.trafficProof],
+    ['Географическое нахождение штаб-квартиры Бренда ', r.headquarters],
+    ['Дата основания Бренда либо компании Клиента ', r.foundationYear],
+    ['Страна, где основан Бренд либо компания Клиента ', r.foundationCountry],
+    ['Период работы на рынке Казахстана ', r.kzMarketSince],
+    ['Учредительный состав ', r.founders],
+    ['Образец текста смс', r.sampleSms],
+    ['IP адрес серверов', r.serverIp]
+  ];
+  for (const [option, data] of cardRows) {
+    await sheetsAppend(card.id, 'Sheet1', [option, data], log, 'appendOrUpdate', 'option');
+  }
+
+  // План документов по операторам
+  const plan = nodeDocumentPlan(r);
+  log('План документов по операторам', `Составлен план: ${plan.length} файл(ов) — ${plan.map(t => t.operator).join(', ')}`, 'ok');
+
+  // Цикл по документам операторов (splitInBatches)
+  for (const target of plan) {
+    log('Цикл по документам операторов', `→ Обрабатываем «${target.fileName}» (${target.operator})`);
+    await processTarget(target, log);
+  }
+
+  // Итоговое уведомление о заявке (telegram)
+  const filesList = plan.map(i => '• ' + i.operator + ': ' + i.fileName).join('\n');
+  const text = `Заявка согласована и обработана.\n\n` +
+    `Операторы: ${r.operatorsText}\nТип: ${r.local}\nДействие: ${r.connection}\n\n` +
+    `Альфа-имя: ${r.senderName}\nКомпания: ${r.companyName}\nБИН: ${r.bin}\nДата подключения: ${r.connectionDateRu}\n\n` +
+    `Обновлённые файлы:\n${filesList}\n\nСпасибо!`;
+  await telegramSend(text, log);
+}
+
+async function handleManagerSubmit(body, log) {
+  // 09b Webhook POST (решение менеджера)
+  log('09b Webhook POST (решение менеджера)', 'Получено решение менеджера');
+  // 09c Проверка решения и даты
+  const result = nodeCheckDecision(body);
+  // 09d Решение валидно? (if $json.success === true)
+  if (!result.success) {
+    // 09e Ответ с ошибкой менеджеру (responseCode 422)
+    log('09e Ответ с ошибкой менеджеру', JSON.stringify({ success: false, errors: result.errors }), 'err');
+    return { success: false, errors: result.errors };
+  }
+  // 09f Ответ об успехе менеджеру
+  log('09f Ответ об успехе менеджеру', JSON.stringify({ success: true, requestId: result.requestId, decision: result.decision }), 'ok');
+
+  // Проверка и подготовка заявки
+  const r = nodePrepareRequest(result);
+  log('Проверка и подготовка заявки', `Неделя: ${r.weekStart}${r.mtsMovedToNextWeek ? ' (MTS → ' + r.weekStartMts + ': пн после 16:00)' : ''}`, 'ok');
+
+  // Статус заявки (switch)
+  if (r.status === 'rejected') {
+    // Уведомление: заявка отклонена (telegram)
+    const text = `Заявка отклонена.\n\nАльфа-имя: ${r.senderName}\nКомпания: ${r.companyName}\nБИН: ${r.bin}`;
+    await telegramSend(text, log);
+    removePendingRequest(r.requestId);
+    return { success: true, requestId: r.requestId, decision: 'Отклонено' };
+  }
+
+  // outputKey "Согласовано" → три параллельные ветки оригинала выполняем последовательно
+  await processApprovedRequest(r, log);
+  removePendingRequest(r.requestId);
+  return { success: true, requestId: r.requestId, decision: 'Согласовано' };
+}
+
+/* ============================================================================
+ * ЦЕПОЧКА 3: Ручной запуск — закрытие недели
+ * manualTrigger → Список документов текущей недели → Поиск документа →
+ * → Подстановка дат недели и конца месяца (replaceAll {{data}} / {{endmonth}})
+ * ==========================================================================*/
+async function handleWeekClose(log) {
+  log('Ручной запуск: закрытие недели', 'manualTrigger');
+  // Список документов текущей недели
+  const weekStart = currentWeekStart();
+  const endMonth = lastWorkingDayOfMonth();
+  const docs = [
+    { prefix: 'stamp_beeline_', folderId: CONFIG.FOLDER_BEELINE },
+    { prefix: 'MTS_without_stamp_', folderId: CONFIG.FOLDER_MTS },
+    { prefix: 'MTS_with_stamp_', folderId: CONFIG.FOLDER_MTS },
+    { prefix: 'Kcell_local_', folderId: CONFIG.FOLDER_KCELL },
+    { prefix: 'Kcell_stamp_', folderId: CONFIG.FOLDER_KCELL }
+  ].map(d => ({
+    fileName: d.prefix + weekStart,
+    query: "name = '" + d.prefix + weekStart + "'",
+    folderId: d.folderId, weekStart, endMonth
+  }));
+  log('Список документов текущей недели', `Неделя: ${weekStart}, конец месяца (рабочий): ${endMonth}, документов: ${docs.length}`, 'ok');
+
+  let processed = 0;
+  for (const d of docs) {
+    // Поиск документа текущей недели
+    const found = await driveSearch(d.query, d.folderId, log);
+    if (!found.length) { log('Поиск документа текущей недели', `«${d.fileName}» не найден — пропуск`, 'warn'); continue; }
+    // Подстановка дат недели и конца месяца
+    await docsReplaceAll(found[0].id, [
+      { text: '{{data}}', replaceText: d.weekStart },
+      { text: '{{endmonth}}', replaceText: d.endMonth }
+    ], log);
+    processed++;
+  }
+  return { weekStart, endMonth, processed, total: docs.length };
+}
+
+/* ============================================================================
+ * UI: ВКЛАДКИ
+ * ==========================================================================*/
+const tabs = document.querySelectorAll('.tab');
+const panels = { client: 'tab-client', manager: 'tab-manager', weekend: 'tab-weekend' };
+function switchTab(name) {
+  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  Object.entries(panels).forEach(([key, id]) => document.getElementById(id).classList.toggle('hidden', key !== name));
+}
+tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+/* ============================================================================
+ * UI: ФОРМА КЛИЕНТА
+ * ==========================================================================*/
+const alphaForm = document.getElementById('alphaForm');
+const connectSection = document.getElementById('connect-only-section');
+document.querySelectorAll('input[name="action"]').forEach(r => {
+  r.addEventListener('change', e => connectSection.classList.toggle('hidden', e.target.value === 'Отключение'));
+});
+const senderNameInput = document.getElementById('senderName');
+const senderNameCount = document.getElementById('senderName-count');
+senderNameInput.addEventListener('input', () => {
+  senderNameInput.value = senderNameInput.value.replace(/[^A-Za-z ]/g, '');
+  senderNameCount.textContent = senderNameInput.value.length;
+  senderNameCount.parentElement.classList.toggle('over', senderNameInput.value.length > 11);
+});
+document.getElementById('bin').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 12);
+});
+
+function showResult(el, cls, html) {
+  el.className = 'result ' + cls;
+  el.innerHTML = html;
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+alphaForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const resultEl = document.getElementById('clientResult');
+  const btn = document.getElementById('submitClientBtn');
+  resultEl.className = 'result';
+
+  // Клиентская пред-валидация (как в JS оригинальной формы)
+  const data = {};
+  const action = document.querySelector('input[name="action"]:checked').value;
+  data.action = action;
+  ['senderName','companyName','bin','activity','website','trafficProof','countriesCount',
+   'headquarters','legalAddress','foundationDate','foundationCountry','kzMarketSince',
+   'founders','sampleSms','serverIp'].forEach(f => {
+    const el = document.getElementById(f);
+    if (el) data[f] = el.value.trim();
+  });
+
+  const log = makeLogger(document.getElementById('clientLog'));
+  btn.disabled = true; btn.textContent = 'Отправка...';
+  try {
+    const out = await handleClientSubmit(data, log);
+    if (out.success) {
+      showResult(resultEl, 'success',
+        `<h3>✅ Заявка принята</h3>
+         <p>Номер заявки: <strong>${out.requestId}</strong></p>
+         <p>Заявка передана на согласование менеджеру. Ссылка согласования (аналог кнопки в Telegram):
+         <a href="#" id="approvalLink">Открыть форму согласования</a></p>
+         <p style="margin-top:8px;font-size:13px;">Мы уведомим вас о решении.</p>`);
+      alphaForm.style.display = 'none';
+      const link = document.getElementById('approvalLink');
+      link.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        loadManagerFormFromUrl(out.approvalUrl);
+        switchTab('manager');
+      });
+    } else {
+      showResult(resultEl, 'error',
+        '<h3>⚠️ Ошибка валидации</h3><ul>' + out.errors.map(x => `<li>${x}</li>`).join('') + '</ul>');
+      btn.disabled = false; btn.textContent = 'Отправить заявку';
+    }
+  } catch (err) {
+    // Аналог Error Workflow → «Уведомление администратору об ошибке»
+    log('Ошибка выполнения', String(err.message || err), 'err');
+    try {
+      await telegramSend(
+        `Ошибка при обработке заявки, обратитесь к администратору.\n\nУзел: web-handler\nОшибка: ${err.message || err}`,
+        log);
+    } catch (e2) { /* игнорируем ошибки самого уведомления */ }
+    showResult(resultEl, 'error',
+      '<h3>❌ Ошибка</h3><p>Не удалось обработать заявку: ' + (err.message || err) + '</p>');
+    btn.disabled = false; btn.textContent = 'Отправить заявку';
+  }
+});
+
+/* ============================================================================
+ * UI: ФОРМА МЕНЕДЖЕРА (согласование)
+ * ==========================================================================*/
+const approvalForm = document.getElementById('approvalForm');
+const loadError = document.getElementById('loadError');
+const approveSection = document.getElementById('approveSection');
+const commentReq = document.getElementById('commentReq');
+const connectionDateField = document.getElementById('field-connectionDate');
+let currentRequest = null; // восстановленный объект заявки (аналог decode из $json.body.req)
+
+document.getElementById('decision').addEventListener('change', e => {
+  const v = e.target.value;
+  approveSection.classList.toggle('hidden', v !== 'Согласовать');
+  commentReq.classList.toggle('hidden', v !== 'Отклонить');
+});
+document.querySelectorAll('input[name="mgrAction"]').forEach(r => r.addEventListener('change', toggleConnectionDate));
+function toggleConnectionDate() {
+  const checked = document.querySelector('input[name="mgrAction"]:checked');
+  connectionDateField.classList.toggle('hidden', !(checked && checked.value === 'Подключение'));
+}
+
+function fillManagerForm(request) {
+  currentRequest = request;
+  loadError.classList.add('hidden');
+  approvalForm.classList.remove('hidden');
+  const set = (id, v) => { document.getElementById(id).textContent = v || '—'; };
+  set('viewRequestId', request.requestId);
+  set('viewSenderName', request.client.senderName);
+  set('viewCompanyName', request.client.companyName);
+  set('viewBin', request.client.bin);
+  set('viewClientAction', request.client.action);
+  const created = request.createdAt ? new Date(request.createdAt) : null;
+  set('viewCreatedAt', created ? created.toLocaleString('ru-RU') : '—');
+  set('viewActivity', request.client.activity);
+  set('viewWebsite', request.client.website);
+  set('viewTrafficProof', request.client.trafficProof);
+  set('viewCountriesCount', request.client.countriesCount);
+  set('viewHeadquarters', request.client.headquarters);
+  set('viewLegalAddress', request.client.legalAddress);
+  const fd = request.client.foundationDate ? new Date(request.client.foundationDate) : null;
+  set('viewFoundationDate', fd ? fd.toLocaleDateString('ru-RU') : '—');
+  set('viewFoundationCountry', request.client.foundationCountry);
+  set('viewKzMarketSince', request.client.kzMarketSince);
+  set('viewFounders', request.client.founders);
+  set('viewSampleSms', request.client.sampleSms);
+  set('viewServerIp', request.client.serverIp);
+
+  const defaultRadio = document.getElementById(request.client.action === 'Отключение' ? 'mgrAction-disconnect' : 'mgrAction-connect');
+  if (defaultRadio) defaultRadio.checked = true;
+  toggleConnectionDate();
+
+  const today = new Date();
+  const todayStr = today.getFullYear() + '-' + pad(today.getMonth() + 1) + '-' + pad(today.getDate());
+  document.getElementById('connectionDate').setAttribute('min', todayStr);
+}
+
+function loadManagerFormFromUrl(url) {
+  try {
+    const u = new URL(url, window.location.href);
+    const rawReq = u.searchParams.get('req') || '';
+    if (!rawReq) throw new Error('missing');
+    const request = JSON.parse(b64ToUtf8(decodeURIComponent(rawReq)));
+    if (!request || !request.client || !request.requestId) throw new Error('shape');
+    fillManagerForm(request);
+  } catch (e) {
+    currentRequest = null;
+    approvalForm.classList.add('hidden');
+    loadError.classList.remove('hidden');
+  }
+}
+
+// Автозагрузка: ?tab=manager&req=... (аналог GET webhook /manager/approval)
+(function initFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('tab') === 'manager') switchTab('manager');
+  if (params.get('req')) loadManagerFormFromUrl(window.location.href);
+})();
+
+// Если форма не загружена из URL — даём выбрать из списка ожидающих заявок
+function renderPendingList() {
+  if (currentRequest) return;
+  const pending = getPendingRequests();
+  if (!pending.length) return;
+  const html = '<h3>📥 Ожидают согласования</h3><ul>' +
+    pending.map(p => `<li><a href="#" data-rid="${p.requestId}">${p.requestId}</a> — ${p.client.senderName} (${p.client.companyName})</li>`).join('') + '</ul>';
+  showResult(loadError, 'info', html);
+  loadError.classList.remove('hidden');
+  loadError.querySelectorAll('a').forEach(a => a.addEventListener('click', ev => {
+    ev.preventDefault();
+    const req = getPendingRequests().find(x => x.requestId === a.dataset.rid);
+    if (req) fillManagerForm(req);
+  }));
+}
+renderPendingList();
+
+approvalForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!currentRequest) return;
+  const resultEl = document.getElementById('managerResult');
+  const btn = document.getElementById('submitManagerBtn');
+  resultEl.className = 'result';
+
+  // Клиентская валидация формы (как в JS узла 09a)
+  const errors = [];
+  const decision = document.getElementById('decision').value;
+  const comment = document.getElementById('comment').value.trim();
+  if (!decision) errors.push('Укажите решение по заявке (Согласовать/Отклонить)');
+
+  let payloadData = null;
+  if (decision === 'Отклонить') {
+    if (!comment) errors.push('При отклонении заявки укажите комментарий');
+    payloadData = { decision, comment };
+  } else if (decision === 'Согласовать') {
+    const mgrActionEl = document.querySelector('input[name="mgrAction"]:checked');
+    const trafficTypeEl = document.querySelector('input[name="trafficType"]:checked');
+    const operatorEls = document.querySelectorAll('input[name="operators"]:checked');
+    const connectionDate = document.getElementById('connectionDate').value;
+    if (!mgrActionEl) errors.push('Укажите действие: Подключение или Отключение');
+    if (!trafficTypeEl) errors.push('Укажите тип трафика: Локал или Межнар');
+    if (operatorEls.length === 0) errors.push('Выберите хотя бы одного оператора');
+    const action = mgrActionEl ? mgrActionEl.value : null;
+    if (action === 'Подключение') {
+      if (!connectionDate) errors.push('Укажите дату подключения');
+      else {
+        const selected = new Date(connectionDate + 'T00:00:00');
+        const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+        const dow = selected.getDay();
+        if (selected < today0) errors.push('Дата подключения не может быть в прошлом');
+        else if (dow === 0 || dow === 6) errors.push('Дата подключения не может выпадать на выходной день (сб/вс)');
+      }
+    }
+    payloadData = {
+      decision, comment, action,
+      trafficType: trafficTypeEl ? trafficTypeEl.value : null,
+      operators: Array.prototype.map.call(operatorEls, el => el.value),
+      connectionDate: action === 'Подключение' ? connectionDate : null
+    };
+  }
+
+  if (errors.length) {
+    showResult(resultEl, 'error', '<h3>⚠️ Проверьте форму</h3><ul>' + errors.map(x => `<li>${x}</li>`).join('') + '</ul>');
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Отправка...';
+  const log = makeLogger(document.getElementById('managerLog'));
+  try {
+    // Payload как в оригинале: { req: <base64 исходной заявки>, ...данные формы }
+    const encodedReq = encodeURIComponent(utf8ToB64(JSON.stringify({
+      requestId: currentRequest.requestId,
+      createdAt: currentRequest.createdAt,
+      client: currentRequest.client
+    })));
+    const body = Object.assign({ req: encodedReq }, payloadData);
+
+    const out = await handleManagerSubmit(body, log);
+    if (out.success) {
+      showResult(resultEl, 'success',
+        `<h3>✅ Решение сохранено</h3><p>Заявка ${out.requestId}: <strong>${out.decision}</strong>. Обработка завершена — детали в консоли операций выше.</p>`);
+      approvalForm.style.display = 'none';
+      currentRequest = null;
+      renderPendingList();
+    } else {
+      showResult(resultEl, 'error',
+        '<h3>⚠️ Ошибка</h3><ul>' + (out.errors || ['Не удалось сохранить решение']).map(x => `<li>${x}</li>`).join('') + '</ul>');
+      btn.disabled = false; btn.textContent = 'Отправить решение';
+    }
+  } catch (err) {
+    log('Ошибка выполнения', String(err.message || err), 'err');
+    try {
+      await telegramSend(
+        `Ошибка при обработке заявки, обратитесь к администратору.\n\nУзел: manager-handler\nОшибка: ${err.message || err}`,
+        log);
+    } catch (e2) { /* игнорируем */ }
+    showResult(resultEl, 'error', '<h3>❌ Ошибка</h3><p>' + (err.message || err) + '</p>');
+    btn.disabled = false; btn.textContent = 'Отправить решение';
+  }
+});
+
+/* ============================================================================
+ * UI: ЗАКРЫТИЕ НЕДЕЛИ
+ * ==========================================================================*/
+document.getElementById('runWeekEndBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('runWeekEndBtn');
+  const resultEl = document.getElementById('weekendResult');
+  const log = makeLogger(document.getElementById('weekendLog'));
+  btn.disabled = true; btn.textContent = 'Выполняется...';
+  resultEl.className = 'result';
+  try {
+    const out = await handleWeekClose(log);
+    showResult(resultEl, 'success',
+      `<h3>✅ Неделя закрыта</h3><p>Дата недели: <strong>${out.weekStart}</strong>, последний рабочий день месяца: <strong>${out.endMonth}</strong>. Обновлено документов: ${out.processed} из ${out.total}.</p>`);
+  } catch (err) {
+    log('Ошибка выполнения', String(err.message || err), 'err');
+    showResult(resultEl, 'error', '<h3>❌ Ошибка</h3><p>' + (err.message || err) + '</p>');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Запустить закрытие недели';
+  }
+});
+</script>
+</body>
+</html>

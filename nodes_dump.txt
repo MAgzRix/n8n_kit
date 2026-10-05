@@ -1,0 +1,919 @@
+================================================================================
+NODE: 09b Webhook POST (решение менеджера)1 | n8n-nodes-base.webhook
+{
+ "httpMethod": "POST",
+ "path": "manager/approval/submit",
+ "responseMode": "responseNode",
+ "options": {}
+}
+================================================================================
+NODE: 09c Проверка решения и даты1 | n8n-nodes-base.code
+{
+ "jsCode": "// === 09c Проверка решения и даты ===\n// Решение менеджера приходит из HTML-формы (POST), а не из Telegram sendAndWait.\n// Исходные данные заявки восстанавливаются из base64 (поле req), т.к. форма и\n// отправка решения выполняются в ДРУГОМ execution, чем приём заявки от клиента —\n// прямая ссылка на узел $('05 Заявка валидна?2') здесь невозможна и не нужна.\nconst body = $json.body || {};\nconst errors = [];\n\nlet request = null;\ntry {\n  const decoded = Buffer.from(decodeURIComponent(body.req || ''), 'base64').toString('utf-8');\n  request = JSON.parse(decoded);\n  if (!request || !request.client || !request.requestId) throw new Error('bad shape');\n} catch (e) {\n  return [{ json: { success: false, errors: ['Не удалось прочитать данные заявки. Ссылка повреждена или устарела.'] } }];\n}\n\nconst decision = String(body.decision || '').trim();\nconst comment = String(body.comment || '').trim();\nconst action = String(body.action || '').trim();\nconst trafficType = String(body.trafficType || '').trim();\nconst connectionDate = body.connectionDate ? String(body.connectionDate).trim() : '';\nlet operators = [];\nif (Array.isArray(body.operators)) operators = body.operators;\nelse if (typeof body.operators === 'string' && body.operators) operators = body.operators.split(',').map(s => s.trim()).filter(Boolean);\n\nif (!decision || !['Согласовать', 'Отклонить'].includes(decision)) {\n  errors.push('Укажите решение по заявке (Согласовать/Отклонить).');\n}\n\nif (decision === 'Отклонить' && !comment) {\n  errors.push('При отклонении заявки укажите комментарий.');\n}\n\nif (decision === 'Согласовать') {\n  if (!action || !['Подключение', 'Отключение'].includes(action)) {\n    errors.push('Укажите действие: Подключение или Отключение.');\n  }\n  if (!trafficType || !['Локал', 'Межнар'].includes(trafficType)) {\n    errors.push('Укажите тип трафика: Локал или Межнар.');\n  }\n  if (operators.length === 0) {\n    errors.push('Выберите хотя бы одного оператора.');\n  }\n  if (action === 'Подключение') {\n    if (!connectionDate) {\n      errors.push('Укажите дату подключения.');\n    } else {\n      const selectedDate = new Date(connectionDate + 'T00:00:00');\n      if (isNaN(selectedDate.getTime())) {\n        errors.push('Некорректная дата подключения.');\n      } else {\n        const today = new Date();\n        today.setHours(0, 0, 0, 0);\n        if (selectedDate < today) {\n          errors.push('Дата подключения не может быть в прошлом.');\n        }\n        const dayOfWeek = selectedDate.getDay();\n        if (dayOfWeek === 0 || dayOfWeek === 6) {\n          errors.push('Дата подключения не может быть выходным днем (суббота или воскресенье).');\n        }\n      }\n    }\n  }\n}\n\nif (errors.length > 0) {\n  return [{ json: { success: false, errors } }];\n}\n\nif (decision === 'Отклонить') {\n  return [{\n    json: {\n      ...request,\n      status: 'REJECTED',\n      updatedAt: new Date().toISOString(),\n      approved: false,\n      decision,\n      comment,\n      success: true,\n    }\n  }];\n}\n\nconst clientAction = request.client.action;\nconst actionOverridden = clientAction && clientAction !== action;\n\nreturn [{\n  json: {\n    ...request,\n    status: 'PROCESSING',\n    updatedAt: new Date().toISOString(),\n    approved: true,\n    decision,\n    comment,\n    actionOverridden,\n    routing: {\n      trafficType,\n      action,\n      operators,\n      connectionDate: connectionDate || null,\n    },\n    success: true,\n  }\n}];"
+}
+================================================================================
+NODE: 09d Решение валидно?1 | n8n-nodes-base.if
+{
+ "conditions": {
+  "options": {
+   "caseSensitive": true,
+   "leftValue": "",
+   "typeValidation": "strict",
+   "version": 2
+  },
+  "conditions": [
+   {
+    "id": "e2d4f001-0000-4000-8000-000000000001",
+    "leftValue": "={{ $json.success }}",
+    "rightValue": true,
+    "operator": {
+     "type": "boolean",
+     "operation": "equals"
+    }
+   }
+  ],
+  "combinator": "and"
+ },
+ "options": {}
+}
+================================================================================
+NODE: 09f Ответ об успехе менеджеру1 | n8n-nodes-base.respondToWebhook
+{
+ "respondWith": "json",
+ "responseBody": "={{ JSON.stringify({ success: true, requestId: $json.requestId, decision: $json.decision }) }}",
+ "options": {
+  "responseCode": 200,
+  "responseHeaders": {
+   "entries": [
+    {
+     "name": "Content-Type",
+     "value": "application/json; charset=utf-8"
+    }
+   ]
+  }
+ }
+}
+================================================================================
+NODE: Проверка и подготовка заявки | n8n-nodes-base.code
+{
+ "jsCode": "// Данные заявки и решение менеджера приходят из улучшенной HTML-формы (узел 09c)\nconst src = $input.first().json;\nconst c = src.client || {};\nconst routing = src.routing || {};\nfunction str(v) { return String(v === undefined || v === null ? '' : v).trim(); }\n\nconst approved = src.approved === true;\nconst status = approved ? 'approved' : 'rejected';\nconst local = str(routing.trafficType);\nconst connection = str(routing.action || c.action);\nconst connectionDate = str(routing.connectionDate);\nlet operators = routing.operators || [];\nif (!Array.isArray(operators)) operators = operators ? [operators] : [];\n\n// Текущее время по Алматы\nconst nowAlmaty = DateTime.now().setZone('Asia/Almaty');\nconst todayAlmaty = nowAlmaty.startOf('day');\nconst wd = todayAlmaty.weekday; // 1 = пн ... 7 = вс\n\n// Неделя заявки: понедельник (если сегодня понедельник — сегодня, иначе ближайший следующий)\nconst weekStart = (wd === 1 ? todayAlmaty : todayAlmaty.plus({ days: 8 - wd })).toISODate();\n\n// MTS: если заявка (подключение/отключение) пришла в понедельник после 16:00 по Алматы —\n// запись уходит в файл следующей недели (следующий понедельник)\nconst mtsLateMonday = wd === 1 && nowAlmaty.hour >= 16;\nconst weekStartMts = mtsLateMonday ? todayAlmaty.plus({ days: 7 }).toISODate() : weekStart;\n\nconst parts = connectionDate.split('-');\nconst connectionDateRu = parts.length === 3 ? parts[2] + '.' + parts[1] + '.' + parts[0] : connectionDate;\n\nreturn [{\n  json: {\n    status,\n    decision: str(src.decision),\n    comment: str(src.comment),\n    requestId: str(src.requestId),\n    senderName: str(c.senderName),\n    companyName: str(c.companyName),\n    bin: str(c.bin),\n    activity: str(c.activity),\n    website: str(c.website),\n    trafficProof: str(c.trafficProof),\n    countriesCount: str(c.countriesCount),\n    headquarters: str(c.headquarters),\n    legalAddress: str(c.legalAddress),\n    foundationYear: str(c.foundationDate),\n    foundationCountry: str(c.foundationCountry),\n    kzMarketSince: str(c.kzMarketSince),\n    founders: str(c.founders),\n    sampleSms: str(c.sampleSms),\n    serverIp: str(c.serverIp),\n    requestDate: str(c.dateToday) || todayAlmaty.toISODate(),\n    today: todayAlmaty.toISODate(),\n    local,\n    connection,\n    operators,\n    operatorsText: operators.join(', '),\n    connectionDate,\n    connectionDateRu,\n    weekStart,\n    weekStartMts,\n    mtsMovedToNextWeek: mtsLateMonday && operators.includes('MTS')\n  }\n}];"
+}
+================================================================================
+NODE: Статус заявки | n8n-nodes-base.switch
+{
+ "rules": {
+  "values": [
+   {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 3
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.status }}",
+       "rightValue": "approved",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "renameOutput": true,
+    "outputKey": "Согласовано"
+   },
+   {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 3
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $json.status }}",
+       "rightValue": "rejected",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "renameOutput": true,
+    "outputKey": "Отклонено"
+   }
+  ]
+ },
+ "options": {}
+}
+================================================================================
+NODE: Запись в реестр заявок | n8n-nodes-base.googleSheets
+{
+ "operation": "append",
+ "documentId": {
+  "__rl": true,
+  "value": "18yzroIyACao83Qlo7PWqVQiAjbmcve3zmtp4tuee8Io",
+  "mode": "id"
+ },
+ "sheetName": {
+  "__rl": true,
+  "value": 1215742679,
+  "mode": "list",
+  "cachedResultName": "Sheet1"
+ },
+ "columns": {
+  "mappingMode": "defineBelow",
+  "value": {
+   "name": "={{ $json.senderName }}",
+   "operator": "={{ $json.operatorsText }}",
+   "connection": "={{ $json.connection }}",
+   "data": "={{ $json.requestDate }}",
+   "state": "={{ $json.local }}"
+  },
+  "matchingColumns": [],
+  "schema": [
+   {
+    "id": "name",
+    "displayName": "name",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "data",
+    "displayName": "data",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "connection",
+    "displayName": "connection",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "operator",
+    "displayName": "operator",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "state",
+    "displayName": "state",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   }
+  ],
+  "attemptToConvertTypes": false,
+  "convertFieldsToString": false
+ },
+ "options": {}
+}
+================================================================================
+NODE: Создание карточки заявки из шаблона | n8n-nodes-base.googleDrive
+{
+ "operation": "copy",
+ "fileId": {
+  "__rl": true,
+  "value": "104jscJ1aZnzidQbMmDHgBV9297OO5xmv3SrkHFnswF0",
+  "mode": "id"
+ },
+ "name": "={{ $json.senderName }}_{{ $json.connection }}_{{ $json.operatorsText }}_{{ $json.local }}_{{ $json.requestDate }}",
+ "sameFolder": false,
+ "driveId": {
+  "__rl": true,
+  "mode": "list",
+  "value": "My Drive"
+ },
+ "folderId": {
+  "__rl": true,
+  "value": "1GBNe5QHJR5H47N7MXhJIVa1jUNJzaiCm",
+  "mode": "id"
+ },
+ "options": {}
+}
+================================================================================
+NODE: Строки карточки заявки | n8n-nodes-base.code
+{
+ "jsCode": "const r = $('Проверка и подготовка заявки').first().json;\nconst spreadsheetId = $input.first().json.id;\nconst rows = [\n  ['Имя отправителя (Sender Name)', r.senderName],\n  ['Название компаниибренда Клиента', r.companyName],\n  ['БИН компании', r.bin],\n  ['Описание деятельности', r.activity],\n  ['Сайт Компанииссылка на приложение', r.website],\n  [' Подтверждение определения трафика ТИП – 1/2 (ссылка на сайт, выписка, скриншот или ссылка на публично доступные в сети Интернет основания, Инстаграм) ', r.trafficProof],\n  ['Географическое нахождение штаб-квартиры Бренда ', r.headquarters],\n  ['Дата основания Бренда либо компании Клиента ', r.foundationYear],\n  ['Страна, где основан Бренд либо компания Клиента ', r.foundationCountry],\n  ['Период работы на рынке Казахстана ', r.kzMarketSince],\n  ['Учредительный состав ', r.founders],\n  ['Образец текста смс', r.sampleSms],\n  ['IP адрес серверов', r.serverIp]\n];\nreturn rows.map(([option, data]) => ({ json: { spreadsheetId, option, data } }));"
+}
+================================================================================
+NODE: Заполнение карточки заявки | n8n-nodes-base.googleSheets
+{
+ "operation": "appendOrUpdate",
+ "documentId": {
+  "__rl": true,
+  "value": "={{ $json.spreadsheetId }}",
+  "mode": "id"
+ },
+ "sheetName": {
+  "__rl": true,
+  "value": 1920758452,
+  "mode": "list",
+  "cachedResultName": "Sheet1"
+ },
+ "columns": {
+  "mappingMode": "defineBelow",
+  "value": {
+   "option": "={{ $json.option }}",
+   "data": "={{ $json.data }}"
+  },
+  "matchingColumns": [
+   "option"
+  ],
+  "schema": [
+   {
+    "id": "option",
+    "displayName": "option",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "data",
+    "displayName": "data",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   }
+  ],
+  "attemptToConvertTypes": false,
+  "convertFieldsToString": false
+ },
+ "options": {}
+}
+================================================================================
+NODE: План документов по операторам | n8n-nodes-base.code
+{
+ "jsCode": "const r = $input.first().json;\nconst ops = r.operators || [];\nconst isLocal = r.local === 'Локал';\nconst isConnect = r.connection === 'Подключение';\nconst week = r.weekStart;\nconst weekMts = r.weekStartMts || r.weekStart; // MTS: пн после 16:00 (Алматы) — следующая неделя\n\nconst FOLDER_BEELINE = '1xh4aibtxQLJ5WPNDkwBRd3924qqLDHBQ';\nconst FOLDER_MTS = '1QgX04z5cRWR1wlDn_8-kOBRJK-76HsYT';\nconst FOLDER_KCELL = '1Cz2jsdbaIIrSpyK8Oho077UMx2uRjVMP';\n\nconst companyBin = r.companyName + '\\n' + r.bin;\nconst shortInfo = 'Деятельность: ' + r.activity + '\\n' + 'Текст: ' + r.sampleSms;\nconst shortInfoWithSite = 'Деятельность: ' + r.activity + '\\n' + 'Сайт: ' + r.website + '\\n' + 'Текст: ' + r.sampleSms;\n\nconst targets = [];\nfunction add(t) {\n  t.fileName = String(t.fileName).split(\"'\").join('');\n  t.query = \"name = '\" + t.fileName + \"'\";\n  targets.push(t);\n}\n\n// Beeline\nif (ops.includes('Beeline')) {\n  if (isLocal) {\n    add({\n      kind: 'doc', operator: 'Beeline Локал',\n      fileName: 'stamp_beeline_' + week, folderId: FOLDER_BEELINE,\n      templateId: '1rxKrviDc0eokW7qwHRBn1oeWg1PWI29z0lXmZpIaftI',\n      tableNumber: isConnect ? 1 : 2,\n      cells: isConnect ? [r.senderName, shortInfoWithSite, companyBin] : [r.senderName, companyBin]\n    });\n  } else {\n    add({\n      kind: 'beelineSheet', operator: 'Beeline Межнар',\n      fileName: 'Beeline_межнар_' + week, folderId: FOLDER_BEELINE,\n      templateId: '1eB3GZ7c6P3my9nfs2BX2uIszsz2xbekPGFtsNTKkdow',\n      isConnect,\n      row: {\n        date: r.today,\n        foundationCountry: r.foundationCountry,\n        senderName: r.senderName,\n        sampleSms: r.sampleSms,\n        trafficProof: r.trafficProof,\n        companyBin: r.companyName + ' БИН: ' + r.bin\n      }\n    });\n  }\n}\n\n// MTS: всегда два документа (без печати и с печатью); таблица 1 — Локал, таблица 2 — Межнар\nif (ops.includes('MTS')) {\n  const cells = [r.senderName, r.local, 'KazTech Altel kazinfotech2  Tele 2', r.connection, r.connectionDateRu, shortInfo, companyBin];\n  add({ kind: 'doc', operator: 'MTS (без печати)', fileName: 'MTS_without_stamp_' + weekMts, folderId: FOLDER_MTS, templateId: '1yj5BeZfjFatx9w2GaI0RFi9lCWBK6G-Xk2XH1qcIKMg', tableNumber: isLocal ? 1 : 2, cells });\n  add({ kind: 'doc', operator: 'MTS (с печатью)', fileName: 'MTS_with_stamp_' + weekMts, folderId: FOLDER_MTS, templateId: '1IKuEzHassviYAxHrrtr8U6XN8WSwLXuRz1vYsaFwZRs', tableNumber: isLocal ? 1 : 2, cells });\n}\n\n// Kcell\nif (ops.includes('Kcell')) {\n  if (isLocal) {\n    const cells = [r.senderName, 'SMSSMPP 212.124.121.186', r.connection, r.connectionDateRu, shortInfo, companyBin];\n    add({ kind: 'doc', operator: 'Kcell Локал', fileName: 'Kcell_local_' + week, folderId: FOLDER_KCELL, templateId: '1IvFO7REd85xeuSdeubVTkh4qb1Ea3d1xAzwEXiW6vFA', tableNumber: 1, cells });\n    add({ kind: 'doc', operator: 'Kcell Локал (с печатью)', fileName: 'Kcell_stamp_' + week, folderId: FOLDER_KCELL, templateId: '1GPJ9SJY9Ynpc0ITJ2Xg9xlHPX6I4_V5ainUli-Jz58U', tableNumber: 1, cells });\n  } else {\n    add({\n      kind: 'kcellSheet', operator: 'Kcell Межнар',\n      fileName: 'Kcell_mezhnar_' + r.connection + '_' + r.senderName + '_' + week, folderId: FOLDER_KCELL,\n      templateId: '1iZGJpCMP_JoN2ephftaCjvISpXu24Ri-3DNeBLhhT6M',\n      rows: [\n        { option: 'Имя отправителя (Sender Name)', data: r.senderName },\n        { option: 'Название компаниибренда Клиента', data: r.companyName },\n        { option: 'Дата основания Бренда либо компании Клиента', data: r.foundationYear },\n        { option: 'Описание деятельности', data: r.activity },\n        { option: 'Сайт Компании / ссылка на приложение', data: r.website },\n        { option: 'Адрес компании', data: r.headquarters },\n        { option: 'БИН', data: r.bin },\n        { option: 'статус', data: r.connection }\n      ]\n    });\n  }\n}\n\nreturn targets.map(t => ({ json: t }));"
+}
+================================================================================
+NODE: Итоговое уведомление о заявке | n8n-nodes-base.telegram
+{
+ "chatId": "-1003645879005",
+ "text": "=Заявка согласована и обработана.\n\nОператоры: {{ $('Проверка и подготовка заявки').first().json.operatorsText }}\nТип: {{ $('Проверка и подготовка заявки').first().json.local }}\nДействие: {{ $('Проверка и подготовка заявки').first().json.connection }}\n\nАльфа-имя: {{ $('Проверка и подготовка заявки').first().json.senderName }}\nКомпания: {{ $('Проверка и подготовка заявки').first().json.companyName }}\nБИН: {{ $('Проверка и подготовка заявки').first().json.bin }}\nДата подключения: {{ $('Проверка и подготовка заявки').first().json.connectionDateRu }}\n\nОбновлённые файлы:\n{{ $('План документов по операторам').all().map(i => '• ' + i.json.operator + ': ' + i.json.fileName).join('\\n') }}\n\nСпасибо!",
+ "additionalFields": {
+  "appendAttribution": false
+ }
+}
+================================================================================
+NODE: Поиск файла недели | n8n-nodes-base.googleDrive
+{
+ "resource": "fileFolder",
+ "searchMethod": "query",
+ "queryString": "={{ $json.query }}",
+ "limit": 1,
+ "filter": {
+  "folderId": {
+   "__rl": true,
+   "value": "={{ $json.folderId }}",
+   "mode": "id"
+  }
+ },
+ "options": {}
+}
+================================================================================
+NODE: Файл недели уже создан? | n8n-nodes-base.if
+{
+ "conditions": {
+  "options": {
+   "caseSensitive": true,
+   "leftValue": "",
+   "typeValidation": "loose",
+   "version": 3
+  },
+  "conditions": [
+   {
+    "leftValue": "={{ $json.id }}",
+    "rightValue": "",
+    "operator": {
+     "type": "string",
+     "operation": "notEmpty",
+     "singleValue": true
+    }
+   }
+  ],
+  "combinator": "and"
+ },
+ "options": {}
+}
+================================================================================
+NODE: Тип файла оператора | n8n-nodes-base.switch
+{
+ "rules": {
+  "values": [
+   {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 3
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $('Цикл по документам операторов').first().json.kind }}",
+       "rightValue": "doc",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "renameOutput": true,
+    "outputKey": "Google Doc (Локал / MTS)"
+   },
+   {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 3
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $('Цикл по документам операторов').first().json.kind }}",
+       "rightValue": "beelineSheet",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "renameOutput": true,
+    "outputKey": "Beeline Межнар"
+   },
+   {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 3
+     },
+     "conditions": [
+      {
+       "leftValue": "={{ $('Цикл по документам операторов').first().json.kind }}",
+       "rightValue": "kcellSheet",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "renameOutput": true,
+    "outputKey": "Kcell Межнар"
+   }
+  ]
+ },
+ "options": {}
+}
+================================================================================
+NODE: Чтение документа оператора | n8n-nodes-base.googleDocs
+{
+ "operation": "get",
+ "documentURL": "={{ $('Тип файла оператора').first().json.id }}",
+ "simple": false
+}
+================================================================================
+NODE: Анализ таблицы и подготовка вставки | n8n-nodes-base.code
+{
+ "jsCode": "const target = $('Цикл по документам операторов').first().json;\nconst doc = $input.first().json;\n\n// Содержимое документа (с вкладками или без)\nlet content = [];\nlet tabId = 't.0';\nif (doc.tabs && doc.tabs.length > 0) {\n  const tab = doc.tabs[0];\n  tabId = (tab.tabProperties && tab.tabProperties.tabId) || 't.0';\n  content = (tab.documentTab && tab.documentTab.body && tab.documentTab.body.content) || [];\n} else {\n  content = (doc.body && doc.body.content) || [];\n}\n\nconst tables = content.filter(el => el.table);\nconst tableEl = tables[target.tableNumber - 1];\nif (!tableEl) {\n  throw new Error('В документе \"' + target.fileName + '\" не найдена таблица №' + target.tableNumber);\n}\n\nconst rows = tableEl.table.tableRows || [];\nif (rows.length === 0) throw new Error('В таблице №' + target.tableNumber + ' нет строк');\nconst lastRow = rows[rows.length - 1];\nconst cells = lastRow.tableCells || [];\n\nconst cellText = cell => (cell.content || [])\n  .map(p => ((p.paragraph && p.paragraph.elements) || []).map(e => (e.textRun && e.textRun.content) || '').join(''))\n  .join('');\nconst isLastRowEmpty = cells.every(c => cellText(c).trim() === '');\n\nconst requests = [];\nif (isLastRowEmpty) {\n  // Вставляем с последней колонки к первой, чтобы индексы не смещались\n  for (let i = cells.length - 1; i >= 0; i--) {\n    const value = target.cells[i];\n    if (value === undefined || value === null || String(value) === '') continue;\n    requests.push({ insertText: { location: { index: cells[i].startIndex + 1, tabId }, text: String(value) } });\n  }\n} else {\n  // Последняя строка занята — добавляем новую пустую строку под ней\n  requests.push({\n    insertTableRow: {\n      tableCellLocation: { tableStartLocation: { index: tableEl.startIndex, tabId }, rowIndex: rows.length - 1, columnIndex: 0 },\n      insertBelow: true\n    }\n  });\n}\n\nreturn [{ json: { documentId: doc.documentId, isLastRowEmpty, body: { requests } } }];"
+}
+================================================================================
+NODE: Обновление таблицы документа | n8n-nodes-base.httpRequest
+{
+ "method": "POST",
+ "url": "=https://docs.googleapis.com/v1/documents/{{ $('Тип файла оператора').first().json.id }}:batchUpdate",
+ "authentication": "predefinedCredentialType",
+ "nodeCredentialType": "googleDocsOAuth2Api",
+ "sendBody": true,
+ "specifyBody": "json",
+ "jsonBody": "={{ JSON.stringify($json.body) }}",
+ "options": {}
+}
+================================================================================
+NODE: Строка заполнена? | n8n-nodes-base.if
+{
+ "conditions": {
+  "options": {
+   "caseSensitive": true,
+   "leftValue": "",
+   "typeValidation": "loose",
+   "version": 3
+  },
+  "conditions": [
+   {
+    "leftValue": "={{ $('Анализ таблицы и подготовка вставки').item.json.isLastRowEmpty }}",
+    "rightValue": true,
+    "operator": {
+     "type": "boolean",
+     "operation": "true",
+     "singleValue": true
+    }
+   }
+  ],
+  "combinator": "and"
+ },
+ "options": {}
+}
+================================================================================
+NODE: Цикл по документам операторов | n8n-nodes-base.splitInBatches
+{
+ "options": {}
+}
+================================================================================
+NODE: Beeline Межнар: подключение? | n8n-nodes-base.if
+{
+ "conditions": {
+  "options": {
+   "caseSensitive": true,
+   "leftValue": "",
+   "typeValidation": "loose",
+   "version": 3
+  },
+  "conditions": [
+   {
+    "leftValue": "={{ $('Цикл по документам операторов').first().json.isConnect }}",
+    "rightValue": true,
+    "operator": {
+     "type": "boolean",
+     "operation": "true",
+     "singleValue": true
+    }
+   }
+  ],
+  "combinator": "and"
+ },
+ "options": {}
+}
+================================================================================
+NODE: Beeline Межнар: запись на подключение | n8n-nodes-base.googleSheets
+{
+ "operation": "append",
+ "documentId": {
+  "__rl": true,
+  "value": "={{ $json.id }}",
+  "mode": "id"
+ },
+ "sheetName": {
+  "__rl": true,
+  "value": 1111389519,
+  "mode": "list",
+  "cachedResultName": "Подключить"
+ },
+ "columns": {
+  "mappingMode": "defineBelow",
+  "value": {
+   "date": "={{ $('Цикл по документам операторов').first().json.row.date }}",
+   "foundationCountry": "={{ $('Цикл по документам операторов').first().json.row.foundationCountry }}",
+   "network": "Beeline",
+   "senderName": "={{ $('Цикл по документам операторов').first().json.row.senderName }}",
+   "sampleSms": "={{ $('Цикл по документам операторов').first().json.row.sampleSms }}",
+   "trafficProof": "={{ $('Цикл по документам операторов').first().json.row.trafficProof }}",
+   "companyName' +  'bin'": "={{ $('Цикл по документам операторов').first().json.row.companyBin }}"
+  },
+  "matchingColumns": [],
+  "schema": [
+   {
+    "id": "date",
+    "displayName": "date",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "foundationCountry",
+    "displayName": "foundationCountry",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "network",
+    "displayName": "network",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "senderName",
+    "displayName": "senderName",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "sampleSms",
+    "displayName": "sampleSms",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "trafficProof",
+    "displayName": "trafficProof",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "companyName' +  'bin'",
+    "displayName": "companyName' +  'bin'",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   }
+  ],
+  "attemptToConvertTypes": false,
+  "convertFieldsToString": false
+ },
+ "options": {}
+}
+================================================================================
+NODE: Beeline Межнар: запись на отключение | n8n-nodes-base.googleSheets
+{
+ "operation": "append",
+ "documentId": {
+  "__rl": true,
+  "value": "={{ $json.id }}",
+  "mode": "id"
+ },
+ "sheetName": {
+  "__rl": true,
+  "value": 114177874,
+  "mode": "list",
+  "cachedResultName": "Отключить"
+ },
+ "columns": {
+  "mappingMode": "defineBelow",
+  "value": {
+   "alfaname": "={{ $('Цикл по документам операторов').first().json.row.senderName }}",
+   "opisanie": "={{ $('Цикл по документам операторов').first().json.row.companyBin }}"
+  },
+  "matchingColumns": [],
+  "schema": [
+   {
+    "id": "alfaname",
+    "displayName": "alfaname",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "opisanie",
+    "displayName": "opisanie",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   }
+  ],
+  "attemptToConvertTypes": false,
+  "convertFieldsToString": false
+ },
+ "options": {}
+}
+================================================================================
+NODE: Kcell Межнар: строки анкеты | n8n-nodes-base.code
+{
+ "jsCode": "const target = $('Цикл по документам операторов').first().json;\nconst spreadsheetId = $input.first().json.id;\nreturn (target.rows || []).map(r => ({ json: { spreadsheetId, option: r.option, data: r.data } }));"
+}
+================================================================================
+NODE: Kcell Межнар: заполнение анкеты | n8n-nodes-base.googleSheets
+{
+ "operation": "append",
+ "documentId": {
+  "__rl": true,
+  "value": "={{ $json.spreadsheetId }}",
+  "mode": "id"
+ },
+ "sheetName": {
+  "__rl": true,
+  "value": 1723309061,
+  "mode": "list",
+  "cachedResultName": "Лист1"
+ },
+ "columns": {
+  "mappingMode": "defineBelow",
+  "value": {
+   "option": "={{ $json.option }}",
+   "data": "={{ $json.data }}"
+  },
+  "matchingColumns": [],
+  "schema": [
+   {
+    "id": "option",
+    "displayName": "option",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   },
+   {
+    "id": "data",
+    "displayName": "data",
+    "required": false,
+    "defaultMatch": false,
+    "display": true,
+    "type": "string",
+    "canBeUsedToMatch": true
+   }
+  ],
+  "attemptToConvertTypes": false,
+  "convertFieldsToString": false
+ },
+ "options": {}
+}
+================================================================================
+NODE: Создание файла недели из шаблона | n8n-nodes-base.googleDrive
+{
+ "operation": "copy",
+ "fileId": {
+  "__rl": true,
+  "value": "={{ $('Цикл по документам операторов').first().json.templateId }}",
+  "mode": "id"
+ },
+ "name": "={{ $('Цикл по документам операторов').first().json.fileName }}",
+ "sameFolder": false,
+ "driveId": {
+  "__rl": true,
+  "mode": "list",
+  "value": "My Drive"
+ },
+ "folderId": {
+  "__rl": true,
+  "value": "={{ $('Цикл по документам операторов').first().json.folderId }}",
+  "mode": "id"
+ },
+ "options": {}
+}
+================================================================================
+NODE: Уведомление: заявка отклонена | n8n-nodes-base.telegram
+{
+ "chatId": "-1003645879005",
+ "text": "=Заявка отклонена.\n\nАльфа-имя: {{ $json.senderName }}\nКомпания: {{ $json.companyName }}\nБИН: {{ $json.bin }}",
+ "additionalFields": {
+  "appendAttribution": false
+ }
+}
+================================================================================
+NODE: 09e Ответ с ошибкой менеджеру1 | n8n-nodes-base.respondToWebhook
+{
+ "respondWith": "json",
+ "responseBody": "={{ JSON.stringify({ success: false, errors: $json.errors }) }}",
+ "options": {
+  "responseCode": 422,
+  "responseHeaders": {
+   "entries": [
+    {
+     "name": "Content-Type",
+     "value": "application/json; charset=utf-8"
+    }
+   ]
+  }
+ }
+}
+================================================================================
+NODE: Ручной запуск: закрытие недели | n8n-nodes-base.manualTrigger
+{}
+================================================================================
+NODE: Список документов текущей недели | n8n-nodes-base.code
+{
+ "jsCode": "// Понедельник текущей недели\nconst weekStart = $today.minus({ days: $today.weekday - 1 }).toISODate();\n\n// Последний рабочий день месяца\nlet end = $today.endOf('month').startOf('day');\nif (end.weekday === 6) end = end.minus({ days: 1 });\nif (end.weekday === 7) end = end.minus({ days: 2 });\nconst endMonth = end.toISODate();\n\nconst docs = [\n  { prefix: 'stamp_beeline_', folderId: '1xh4aibtxQLJ5WPNDkwBRd3924qqLDHBQ' },\n  { prefix: 'MTS_without_stamp_', folderId: '1QgX04z5cRWR1wlDn_8-kOBRJK-76HsYT' },\n  { prefix: 'MTS_with_stamp_', folderId: '1QgX04z5cRWR1wlDn_8-kOBRJK-76HsYT' },\n  { prefix: 'Kcell_local_', folderId: '1Cz2jsdbaIIrSpyK8Oho077UMx2uRjVMP' },\n  { prefix: 'Kcell_stamp_', folderId: '1Cz2jsdbaIIrSpyK8Oho077UMx2uRjVMP' }\n];\n\nreturn docs.map(d => ({\n  json: {\n    fileName: d.prefix + weekStart,\n    query: \"name = '\" + d.prefix + weekStart + \"'\",\n    folderId: d.folderId,\n    weekStart,\n    endMonth\n  }\n}));"
+}
+================================================================================
+NODE: Поиск документа текущей недели | n8n-nodes-base.googleDrive
+{
+ "resource": "fileFolder",
+ "searchMethod": "query",
+ "queryString": "={{ $json.query }}",
+ "limit": 1,
+ "filter": {
+  "folderId": {
+   "__rl": true,
+   "value": "={{ $json.folderId }}",
+   "mode": "id"
+  }
+ },
+ "options": {}
+}
+================================================================================
+NODE: Подстановка дат недели и конца месяца | n8n-nodes-base.googleDocs
+{
+ "operation": "update",
+ "documentURL": "={{ $json.id }}",
+ "actionsUi": {
+  "actionFields": [
+   {
+    "action": "replaceAll",
+    "text": "{{data}}",
+    "replaceText": "={{ $('Список документов текущей недели').first().json.weekStart }}"
+   },
+   {
+    "action": "replaceAll",
+    "text": "{{endmonth}}",
+    "replaceText": "={{ $('Список документов текущей недели').first().json.endMonth }}"
+   }
+  ]
+ }
+}
+================================================================================
+NODE: Ошибка выполнения | n8n-nodes-base.errorTrigger
+{}
+================================================================================
+NODE: Уведомление администратору об ошибке | n8n-nodes-base.telegram
+{
+ "chatId": "-1003645879005",
+ "text": "=Ошибка при обработке заявки, обратитесь к администратору.\n\nУзел: {{ $json.execution.lastNodeExecuted }}\nОшибка: {{ $json.execution.error.message }}\nВыполнение: {{ $json.execution.url }}",
+ "additionalFields": {
+  "appendAttribution": false
+ }
+}
+================================================================================
+NODE: 09 Webhook GET (форма менеджера)1 | n8n-nodes-base.webhook
+{
+ "path": "manager/approval",
+ "responseMode": "responseNode",
+ "options": {}
+}
+================================================================================
+NODE: 09a Отдать HTML форма менеджера | n8n-nodes-base.respondToWebhook
+{
+ "respondWith": "text",
+ "responseBody": "=<!DOCTYPE html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Согласование заявки | Kazinfoteh</title>\n<style>\n  * { box-sizing: border-box; margin: 0; padding: 0; }\n  body {\n    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n    background-color: #f1f5f9;\n    color: #334155;\n    min-height: 100vh;\n    padding: 40px 20px;\n    line-height: 1.6;\n  }\n  .container {\n    max-width: 900px;\n    margin: 0 auto;\n    background: #ffffff;\n    border-radius: 16px;\n    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.05);\n    overflow: hidden;\n    border: 1px solid #e2e8f0;\n  }\n  .header {\n    background: #ffffff;\n    border-bottom: 1px solid #e2e8f0;\n    padding: 32px 40px;\n    text-align: center;\n  }\n  .header h1 {\n    font-size: 26px;\n    font-weight: 700;\n    color: #0f172a;\n    margin-bottom: 12px;\n    letter-spacing: -0.5px;\n  }\n  .header p {\n    font-size: 15px;\n    color: #64748b;\n    max-width: 600px;\n    margin: 0 auto;\n    line-height: 1.6;\n  }\n  .form-body { padding: 32px 40px 40px; }\n  .section {\n    margin-bottom: 32px;\n    padding-bottom: 32px;\n    border-bottom: 1px dashed #e2e8f0;\n  }\n  .section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }\n  .section-title {\n    font-size: 15px;\n    font-weight: 600;\n    color: #0f172a;\n    margin-bottom: 20px;\n    display: flex;\n    align-items: center;\n    gap: 10px;\n    text-transform: uppercase;\n    letter-spacing: 0.5px;\n  }\n  .section-title::before {\n    content: '';\n    width: 4px;\n    height: 18px;\n    background: #3b82f6;\n    border-radius: 4px;\n  }\n  .field { margin-bottom: 20px; }\n  .field label {\n    display: block;\n    font-size: 14px;\n    font-weight: 500;\n    color: #334155;\n    margin-bottom: 8px;\n  }\n  .field label .required { color: #ef4444; margin-left: 3px; }\n  .field input, .field textarea, .field select {\n    width: 100%;\n    padding: 12px 16px;\n    border: 1px solid #cbd5e1;\n    border-radius: 8px;\n    font-size: 15px;\n    color: #0f172a;\n    background: #ffffff;\n    transition: all 0.2s ease;\n    font-family: inherit;\n  }\n  .field input:focus, .field textarea:focus, .field select:focus {\n    outline: none;\n    border-color: #3b82f6;\n    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);\n  }\n  .field textarea { resize: vertical; min-height: 90px; }\n  .field .hint { font-size: 13px; color: #64748b; margin-top: 6px; }\n  .field.error input, .field.error textarea, .field.error select {\n    border-color: #ef4444;\n    background: #fef2f2;\n  }\n  .field .error-msg {\n    color: #ef4444;\n    font-size: 13px;\n    margin-top: 6px;\n    display: none;\n    font-weight: 500;\n  }\n  .field.error .error-msg { display: block; }\n\n  .radio-group, .checkbox-group { display: flex; gap: 16px; margin-top: 4px; flex-wrap: wrap; }\n  .radio-option, .checkbox-option { flex: 1; min-width: 140px; position: relative; }\n  .radio-option input, .checkbox-option input { position: absolute; opacity: 0; width: 0; height: 0; }\n  .radio-option label, .checkbox-option label {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 8px;\n    padding: 14px;\n    border: 1px solid #cbd5e1;\n    border-radius: 10px;\n    text-align: center;\n    cursor: pointer;\n    transition: all 0.2s ease;\n    font-weight: 500;\n    color: #475569;\n    background: #f8fafc;\n    margin: 0;\n  }\n  .radio-option input:checked + label, .checkbox-option input:checked + label {\n    border-color: #3b82f6;\n    background: #eff6ff;\n    color: #1d4ed8;\n    box-shadow: 0 0 0 1px #3b82f6;\n  }\n  .radio-option label:hover, .checkbox-option label:hover { border-color: #94a3b8; }\n\n  .btn {\n    width: 100%;\n    padding: 14px 24px;\n    background: #2563eb;\n    color: #ffffff;\n    border: none;\n    border-radius: 10px;\n    font-size: 16px;\n    font-weight: 600;\n    cursor: pointer;\n    transition: all 0.2s ease;\n    margin-top: 16px;\n    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);\n  }\n  .btn:hover { background: #1d4ed8; transform: translateY(-1px); box-shadow: 0 6px 10px -1px rgba(37, 99, 235, 0.3); }\n  .btn:active { transform: translateY(0); }\n  .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }\n\n  .result { margin: 0 40px 32px; padding: 20px 24px; border-radius: 12px; display: none; }\n  .result.success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; display: block; }\n  .result.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; display: block; }\n  .result h3 { margin-bottom: 8px; font-size: 18px; display: flex; align-items: center; gap: 8px; }\n  .result ul { margin-top: 12px; padding-left: 20px; }\n  .result li { margin: 6px 0; font-size: 14px; }\n\n  .hidden { display: none !important; }\n\n  .data-table {\n    width: 100%;\n    border-collapse: collapse;\n    background: #f8fafc;\n    border: 1px solid #e2e8f0;\n    border-radius: 12px;\n    overflow: hidden;\n  }\n  .data-table tr {\n    border-bottom: 1px solid #e2e8f0;\n  }\n  .data-table tr:last-child {\n    border-bottom: none;\n  }\n  .data-table th {\n    text-align: left;\n    padding: 12px 16px;\n    font-size: 13px;\n    font-weight: 600;\n    color: #64748b;\n    background: #f1f5f9;\n    width: 35%;\n    vertical-align: top;\n    text-transform: uppercase;\n    letter-spacing: 0.3px;\n  }\n  .data-table td {\n    padding: 12px 16px;\n    font-size: 15px;\n    color: #0f172a;\n    word-break: break-word;\n  }\n  .badge {\n    display: inline-block;\n    padding: 4px 12px;\n    border-radius: 20px;\n    font-size: 13px;\n    font-weight: 600;\n    background: #ede9fe;\n    color: #6d28d9;\n  }\n\n  @media (max-width: 640px) {\n    body { padding: 20px 16px; }\n...[TRUNC]
+================================================================================
+NODE: 00 Webhook GET (HTML форма)2 | n8n-nodes-base.webhook
+{
+ "path": "form/alpha-names",
+ "responseMode": "responseNode",
+ "options": {}
+}
+================================================================================
+NODE: 00a Отдать HTML форму2 | n8n-nodes-base.respondToWebhook
+{
+ "respondWith": "text",
+ "responseBody": "<!DOCTYPE html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Заявка на альфа-имя | Kazinfoteh</title>\n<style>\n  * { box-sizing: border-box; margin: 0; padding: 0; }\n  body {\n    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n    background-color: #f1f5f9;\n    color: #334155;\n    min-height: 100vh;\n    padding: 40px 20px;\n    line-height: 1.6;\n  }\n  .container {\n    max-width: 760px;\n    margin: 0 auto;\n    background: #ffffff;\n    border-radius: 16px;\n    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 15px -3px rgba(0, 0, 0, 0.05);\n    overflow: hidden;\n    border: 1px solid #e2e8f0;\n  }\n  .header {\n    background: #ffffff;\n    border-bottom: 1px solid #e2e8f0;\n    padding: 32px 40px;\n    text-align: center;\n  }\n  .header h1 {\n    font-size: 26px;\n    font-weight: 700;\n    color: #0f172a;\n    margin-bottom: 12px;\n    letter-spacing: -0.5px;\n  }\n  .header p {\n    font-size: 15px;\n    color: #64748b;\n    max-width: 600px;\n    margin: 0 auto;\n    line-height: 1.6;\n  }\n  .form-body { padding: 32px 40px 40px; }\n  .section {\n    margin-bottom: 32px;\n    padding-bottom: 32px;\n    border-bottom: 1px dashed #e2e8f0;\n  }\n  .section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }\n  .section-title {\n    font-size: 15px;\n    font-weight: 600;\n    color: #0f172a;\n    margin-bottom: 20px;\n    display: flex;\n    align-items: center;\n    gap: 10px;\n    text-transform: uppercase;\n    letter-spacing: 0.5px;\n  }\n  .section-title::before {\n    content: '';\n    width: 4px;\n    height: 18px;\n    background: #3b82f6;\n    border-radius: 4px;\n  }\n  .field { margin-bottom: 20px; }\n  .field label {\n    display: block;\n    font-size: 14px;\n    font-weight: 500;\n    color: #334155;\n    margin-bottom: 8px;\n  }\n  .field label .required { color: #ef4444; margin-left: 3px; }\n  .field input, .field textarea, .field select {\n    width: 100%;\n    padding: 12px 16px;\n    border: 1px solid #cbd5e1;\n    border-radius: 8px;\n    font-size: 15px;\n    color: #0f172a;\n    background: #ffffff;\n    transition: all 0.2s ease;\n    font-family: inherit;\n  }\n  .field input:focus, .field textarea:focus, .field select:focus {\n    outline: none;\n    border-color: #3b82f6;\n    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);\n  }\n  .field textarea { resize: vertical; min-height: 90px; }\n  .field .hint { font-size: 13px; color: #64748b; margin-top: 6px; }\n  .field.error input, .field.error textarea, .field.error select {\n    border-color: #ef4444;\n    background: #fef2f2;\n  }\n  .field .error-msg {\n    color: #ef4444;\n    font-size: 13px;\n    margin-top: 6px;\n    display: none;\n    font-weight: 500;\n  }\n  .field.error .error-msg { display: block; }\n  \n  .radio-group { display: flex; gap: 16px; margin-top: 4px; }\n  .radio-option { flex: 1; position: relative; }\n  .radio-option input { position: absolute; opacity: 0; width: 0; height: 0; }\n  .radio-option label {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 8px;\n    padding: 14px;\n    border: 1px solid #cbd5e1;\n    border-radius: 10px;\n    text-align: center;\n    cursor: pointer;\n    transition: all 0.2s ease;\n    font-weight: 500;\n    color: #475569;\n    background: #f8fafc;\n    margin: 0;\n  }\n  .radio-option input:checked + label {\n    border-color: #3b82f6;\n    background: #eff6ff;\n    color: #1d4ed8;\n    box-shadow: 0 0 0 1px #3b82f6;\n  }\n  .radio-option label:hover { border-color: #94a3b8; }\n  \n  .btn {\n    width: 100%;\n    padding: 14px 24px;\n    background: #2563eb;\n    color: #ffffff;\n    border: none;\n    border-radius: 10px;\n    font-size: 16px;\n    font-weight: 600;\n    cursor: pointer;\n    transition: all 0.2s ease;\n    margin-top: 16px;\n    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);\n  }\n  .btn:hover { background: #1d4ed8; transform: translateY(-1px); box-shadow: 0 6px 10px -1px rgba(37, 99, 235, 0.3); }\n  .btn:active { transform: translateY(0); }\n  .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }\n  \n  .result { margin: 0 40px 32px; padding: 20px 24px; border-radius: 12px; display: none; }\n  .result.success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; display: block; }\n  .result.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; display: block; }\n  .result h3 { margin-bottom: 8px; font-size: 18px; display: flex; align-items: center; gap: 8px; }\n  .result ul { margin-top: 12px; padding-left: 20px; }\n  .result li { margin: 6px 0; font-size: 14px; }\n  \n  .hidden { display: none !important; }\n  .counter { font-size: 12px; color: #64748b; text-align: right; margin-top: 6px; font-variant-numeric: tabular-nums; }\n  .counter.over { color: #ef4444; font-weight: 600; }\n  \n  @media (max-width: 640px) {\n    body { padding: 20px 16px; }\n    .container { margin: 0; border-radius: 12px; }\n    .header, .form-body, .result { padding-left: 24px; padding-right: 24px; }\n    .radio-group { flex-direction: column; gap: 12px; }\n  }\n</style>\n</head>\n<body>\n<div class=\"container\">\n  <div class=\"header\">\n    <h1>📡 Заявка на альфа-имя</h1>\n    <p>Заполните форму для подключения или отключения альфа-имени (Alpha Name / Sender ID). Имя отправителя — только латиница, максимум 11 символов (пробел считается символом).</p>\n  </div>\n  \n  <form id=\"alphaForm\" class=\"form-body\" novalidate>\n    <div class=\"section\">\n      <div class=\"section-title\">Основная информация</div>\n      \n      <div class=\"field\" id=\"field-action\">\n        <label>Действие <span class=\"required\">*</span></label>\n        <div class=\"radio-group\">\n          <div class=\"radio-option\">\n            <input type=\"radio\...[TRUNC]
+================================================================================
+NODE: 00b Webhook POST (приём данных)2 | n8n-nodes-base.webhook
+{
+ "httpMethod": "POST",
+ "path": "form/alpha-names/submit",
+ "responseMode": "responseNode",
+ "options": {}
+}
+================================================================================
+NODE: 02 Generate Request ID2 | n8n-nodes-base.code
+{
+ "jsCode": "// === 02 Generate Request ID ===\nconst now = new Date();\nfunction pad(n, len = 2) { return String(n).padStart(len, '0'); }\nconst datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;\nconst timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;\nconst randomPart = Math.random().toString(36).slice(2, 6).toUpperCase();\nconst requestId = `ALPHA-${datePart}-${timePart}-${randomPart}`;\n\n// Данные приходят из POST webhook в $json.body\nconst body = $json.body || {};\n\nreturn [{\n  json: {\n    ...body,\n    requestId,\n    createdAt: now.toISOString(),\n    updatedAt: now.toISOString(),\n    status: 'RECEIVED',\n  }\n}];"
+}
+================================================================================
+NODE: 03 Normalize Input2 | n8n-nodes-base.code
+{
+ "jsCode": "// === 03 Normalize Input ===\nfunction stripInvisible(v) {\n  if (v === undefined || v === null) return '';\n  return String(v).replace(/^[\\n\\r\\t]+|[\\n\\r\\t]+$/g, '');\n}\nfunction safeTrim(v) {\n  if (v === undefined || v === null) return '';\n  return String(v).trim();\n}\n\nconst f = $json;\n\nconst normalized = {\n  action: safeTrim(f.action),\n  senderName: stripInvisible(f.senderName),\n  companyName: safeTrim(f.companyName),\n  bin: safeTrim(f.bin),\n  activity: safeTrim(f.activity),\n  website: safeTrim(f.website),\n  trafficProof: safeTrim(f.trafficProof),\n  countriesCount: safeTrim(f.countriesCount),\n  headquarters: safeTrim(f.headquarters),\n  legalAddress: safeTrim(f.legalAddress),\n  foundationDate: safeTrim(f.foundationDate),\n  foundationCountry: safeTrim(f.foundationCountry),\n  kzMarketSince: safeTrim(f.kzMarketSince),\n  founders: safeTrim(f.founders),\n  sampleSms: safeTrim(f.sampleSms),\n  serverIp: safeTrim(f.serverIp),\n  dateToday: new Date().toISOString().split('T')[0],\n};\n\nreturn [{\n  json: {\n    requestId: f.requestId,\n    createdAt: f.createdAt,\n    updatedAt: new Date().toISOString(),\n    status: 'RECEIVED',\n    client: normalized,\n  }\n}];"
+}
+================================================================================
+NODE: 04 Validate Request2 | n8n-nodes-base.code
+{
+ "jsCode": "// === 04 Validate Request ===\nconst c = $json.client;\nconst errors = [];\n\nif (!c.action || !['Подключение', 'Отключение'].includes(c.action)) {\n  errors.push('Ошибка в поле «Действие»: выберите «Подключение» или «Отключение».');\n}\nconst isDisconnect = c.action === 'Отключение';\n\nconst senderNamePattern = /^[A-Za-z ]{1,11}$/;\nif (!c.senderName) {\n  errors.push('Ошибка в поле «Имя отправителя/Заголовки»: поле обязательно для заполнения.');\n} else if (!senderNamePattern.test(c.senderName)) {\n  errors.push('Ошибка в поле «Имя отправителя/Заголовки»: значение должно содержать не более 11 символов и состоять только из латинских букв и пробелов.');\n}\n\nconst binPattern = /^[0-9]{12}$/;\nif (!c.bin) {\n  errors.push('Ошибка в поле «БИН компании»: поле обязательно для заполнения.');\n} else if (!binPattern.test(c.bin)) {\n  errors.push('Ошибка в поле «БИН компании»: БИН должен содержать ровно 12 цифр.');\n}\n\nif (!c.companyName || c.companyName.trim().length === 0) {\n  errors.push('Ошибка в поле «Название компании/бренда Клиента»: поле обязательно для заполнения.');\n} else if (c.companyName.length > 300) {\n  errors.push('Ошибка в поле «Название компании/бренда Клиента»: превышена максимальная длина (300 символов).');\n}\n\nif (!isDisconnect) {\n  if (!c.legalAddress || c.legalAddress.trim().length === 0) {\n    errors.push('Ошибка в поле «Юр. адрес компании»: поле обязательно для заполнения.');\n  } else if (c.legalAddress.length > 500) {\n    errors.push('Ошибка в поле «Юр. адрес компании»: превышена максимальная длина (500 символов).');\n  }\n  if (!c.activity) errors.push('Ошибка в поле «Описание деятельности»: поле обязательно для заполнения.');\n  if (!c.website) errors.push('Ошибка в поле «Сайт Компании / ссылка на приложение»: поле обязательно для заполнения.');\n  if (!c.headquarters) errors.push('Ошибка в поле «Географическое нахождение штаб-квартиры Бренда»: поле обязательно для заполнения.');\n  if (!c.foundationDate) errors.push('Ошибка в поле «Дата основания Бренда либо компании Клиента»: поле обязательно для заполнения.');\n  if (!c.sampleSms) errors.push('Ошибка в поле «Образец текста смс»: поле обязательно для заполнения.');\n}\n\nreturn [{\n  json: {\n    ...$json,\n    status: errors.length ? 'INVALID' : 'VALIDATED',\n    updatedAt: new Date().toISOString(),\n    validationErrors: errors,\n  }\n}];"
+}
+================================================================================
+NODE: 05 Заявка валидна?2 | n8n-nodes-base.if
+{
+ "conditions": {
+  "options": {
+   "caseSensitive": true,
+   "leftValue": " ",
+   "typeValidation": "strict",
+   "version": 2
+  },
+  "conditions": [
+   {
+    "id": "959fdf1d-427a-4e45-aee2-ef32a351772a",
+    "leftValue": "={{ $json.validationErrors.length }}",
+    "rightValue": 0,
+    "operator": {
+     "type": "number",
+     "operation": "equals"
+    }
+   }
+  ],
+  "combinator": "and"
+ },
+ "options": {}
+}
+================================================================================
+NODE: 07 Ответ об успехе клиенту2 | n8n-nodes-base.respondToWebhook
+{
+ "respondWith": "json",
+ "responseBody": "={{ JSON.stringify({ success: true, requestId: $json.requestId, message: 'Заявка принята' }) }}",
+ "options": {
+  "responseCode": 200,
+  "responseHeaders": {
+   "entries": [
+    {
+     "name": "Content-Type",
+     "value": "application/json; charset=utf-8"
+    }
+   ]
+  }
+ }
+}
+================================================================================
+NODE: 08 Подготовка ссылки согласования1 | n8n-nodes-base.code
+{
+ "jsCode": "// === 08 Подготовка ссылки согласования ===\n// Кодируем полный объект заявки (requestId, createdAt, client...) в base64,\n// чтобы передать его через URL менеджеру без хранения состояния между вызовами\n// (устраняет баг с $('05 Заявка валидна?2') при разрыве executions).\nconst item = $json;\nconst payload = {\n  requestId: item.requestId,\n  createdAt: item.createdAt,\n  client: item.client,\n};\nconst encoded = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64');\nconst reqParam = encodeURIComponent(encoded);\nconst baseUrl = 'https://kazinfoteh.app.n8n.cloud';\nconst approvalUrl = `${baseUrl}/webhook/manager/approval?req=${reqParam}`;\n\nreturn [{ json: { ...item, approvalUrl } }];"
+}
+================================================================================
+NODE: 08a Уведомление менеджеру (Telegram) | n8n-nodes-base.telegram
+{
+ "chatId": "-1003645879005",
+ "text": "=🆕 Новая заявка на альфа-имя!\n\n📋 ID: {{ $json.requestId }}\n🏷 Альфа-имя: {{ $json.client.senderName }}\n🏢 Компания: {{ $json.client.companyName }}\n🔢 БИН: {{ $json.client.bin }}\n⚡ Действие: {{ $json.client.action }}\n\n👉 Нажмите кнопку ниже, чтобы перейти к согласованию:",
+ "replyMarkup": "inlineKeyboard",
+ "inlineKeyboard": {
+  "rows": [
+   {
+    "row": {
+     "buttons": [
+      {
+       "text": "=Открыть форму согласования",
+       "additionalFields": {
+        "url": "={{ $json.approvalUrl }}"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "additionalFields": {
+  "appendAttribution": false
+ }
+}
+================================================================================
+NODE: 06 Ответ с ошибками клиенту2 | n8n-nodes-base.respondToWebhook
+{
+ "respondWith": "json",
+ "responseBody": "={{ JSON.stringify({ success: false, errors: $json.validationErrors }) }}",
+ "options": {
+  "responseCode": 200,
+  "responseHeaders": {
+   "entries": [
+    {
+     "name": "Content-Type",
+     "value": "application/json; charset=utf-8"
+    }
+   ]
+  }
+ }
+}
